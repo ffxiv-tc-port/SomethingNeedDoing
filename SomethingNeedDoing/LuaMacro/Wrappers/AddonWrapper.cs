@@ -32,6 +32,9 @@ public unsafe class AddonWrapper(string name) : IWrapper
         }
     }
 
+    [LuaDocs(description: "Gets all non-empty string values from the addon's AtkValues, in order.")]
+    public List<string> GetValueTexts() => [.. AtkValuesList.Select(v => v.GetValueAsString()).Where(s => !string.IsNullOrEmpty(s))];
+
     [LuaDocs] public NodeWrapper GetNode(params int[] nodeIds) => new(Addon, nodeIds);
 
     [LuaDocs]
