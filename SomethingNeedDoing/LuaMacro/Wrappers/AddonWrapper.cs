@@ -1,4 +1,7 @@
-﻿using FFXIVClientStructs.FFXIV.Component.GUI;
+﻿using ECommons.Automation.UIInput;
+using ECommons.UIHelpers;
+using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using FFXIVClientStructs.Interop;
 using SomethingNeedDoing.Core.Interfaces;
 
@@ -34,6 +37,51 @@ public unsafe class AddonWrapper(string name) : IWrapper
 
     [LuaDocs(description: "Gets all non-empty string values from the addon's AtkValues, in order.")]
     public List<string> GetValueTexts() => [.. AtkValuesList.Select(v => v.GetValueAsString()).Where(s => !string.IsNullOrEmpty(s))];
+
+    [LuaDocs(description: "Dumps every node's id/type/visibility/text, for diagnosing an addon's node layout.")]
+    public List<string> DumpNodes()
+    {
+        var list = new List<string>();
+        foreach (var node in NodeList)
+        {
+            var n = node.Value;
+            var text = string.Empty;
+            try
+            {
+                if (n->Type == NodeType.Text)
+                    text = n->GetAsAtkTextNode()->NodeText.ToString();
+            }
+            catch { /* not a text node or unreadable, ignore */ }
+            list.Add($"id={n->NodeId} type={n->Type} visible={n->IsVisible()} text={text}");
+        }
+        return list;
+    }
+
+    [LuaDocs(description: "Fires a DragDropClick event with the right-click button flag on the given 'which' slot index (as seen via a ReceiveEvent hook), simulating a right-click on a drag-drop slot (e.g. the soil/seed slots in the housing gardening addon) without needing real mouse input.")]
+    public void RightClickDragDropSlot(int which)
+    {
+        var addon = Addon;
+        var evt = new AtkEvent
+        {
+            Listener = (AtkEventListener*)addon,
+            Target = &AtkStage.Instance()->AtkEventTarget,
+            Param = (uint)which,
+        };
+        var data = new AtkEventDataBuilder().Write<byte>(6, 1).Build(); // offset 6 = AtkMouseData.ButtonId, 1 = right click
+        addon->ReceiveEvent(AtkEventType.DragDropClick, which, &evt, &data);
+    }
+
+    [LuaDocs(description: "Clicks a component button by node id, if enabled and visible. Returns true if clicked.")]
+    public bool ClickButton(uint nodeId)
+    {
+        var addon = Addon;
+        var button = addon->GetComponentButtonById(nodeId);
+        if (button == null || !button->IsEnabled || !button->AtkResNode->IsVisible())
+            return false;
+
+        button->ClickAddonButton(addon);
+        return true;
+    }
 
     [LuaDocs] public NodeWrapper GetNode(params int[] nodeIds) => new(Addon, nodeIds);
 
