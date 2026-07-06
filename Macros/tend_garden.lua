@@ -279,7 +279,8 @@ local function harvestThenReplant(entity, options)
     return trySowSeed()
 end
 
--- 對單一種植物件執行一次：互動 -> 讀狀態訊息 -> 依狀態決定動作。回傳 true/false 代表這次有沒有順利跑完。
+-- 對單一種植物件執行一次：互動 -> 讀狀態訊息 -> 依狀態決定動作。
+-- 回傳 (ok, category)：ok 代表這次有沒有順利跑完，category 是這次處理結果的分類，用於最後彙總回報。
 local function tendOnePlotOnce(entity)
     Chat.ClearLastMessage()
     entity:SetAsTarget()
@@ -293,7 +294,7 @@ local function tendOnePlotOnce(entity)
         for i = 0, names.Count - 1 do table.insert(parts, names[i]) end
         Dalamud.Log(string.format("互動失敗（可能距離太遠或已被其他效果擋住）：%s [Exists=%s Ready=%s] 可見視窗=[%s]",
             tostring(Chat.GetLastMessage()), tostring(addon.Exists), tostring(addon.Ready), table.concat(parts, ",")))
-        return false
+        return false, "failed"
     end
 
     local statusMsg = Chat.GetLastMessage()
@@ -313,25 +314,27 @@ local function tendOnePlotOnce(entity)
         if sowIdx then
             Dalamud.Log("空盆，嘗試播種 " .. SEED_ITEM_NAME)
             selectOption(sowIdx)
-            return trySowSeed()
+            local ok = trySowSeed()
+            return ok, (ok and "sown" or "failed")
         end
         cancelIfPossible(options)
-        return true -- 沒有播種選項就是正常跳過，不算失敗
+        return true, "skipped" -- 沒有播種選項就是正常跳過，不算失敗
     end
 
     if status == MATURE_TEXT then
         if statusMsg:find(TARGET_PLANT_NAME, 1, true) then
-            return harvestThenReplant(entity, options)
+            local ok = harvestThenReplant(entity, options)
+            return ok, (ok and "harvested" or "failed")
         end
         Dalamud.LogDebug("已成熟但不是目標作物，跳過：" .. statusMsg)
         cancelIfPossible(options)
-        return true
+        return true, "skipped"
     end
 
     if status == WITHERED_TEXT then
         Dalamud.Log("已經枯萎了，跳過，需要人工處理")
         cancelIfPossible(options)
-        return true
+        return true, "withered"
     end
 
     if status == NEEDS_CARE_TEXT then
@@ -344,7 +347,7 @@ local function tendOnePlotOnce(entity)
             entity:Interact()
             if not waitForSelectStringAfterInteract(3000) then
                 Dalamud.Log("護理後重新互動失敗")
-                return false
+                return false, "failed"
             end
             local options2 = readSelectStringOptions()
             local fertIdx = optionIndex(options2, FERTILIZE_LABEL)
@@ -358,7 +361,7 @@ local function tendOnePlotOnce(entity)
             Dalamud.Log("狀態不太好，但找不到護理選項，取消跳過")
             cancelIfPossible(options)
         end
-        return true
+        return true, "cared"
     end
 
     if status == HEALTHY_TEXT then
@@ -371,20 +374,21 @@ local function tendOnePlotOnce(entity)
         else
             cancelIfPossible(options)
         end
-        return true
+        return true, "fertilized"
     end
 
     -- 不認得的狀態，安全起見取消跳過
     Dalamud.Log(string.format("未知狀態訊息 [%s]，取消跳過，請回報這則訊息內容", tostring(statusMsg)))
     cancelIfPossible(options)
-    return true
+    return true, "unknown"
 end
 
--- 包一層重試：失敗就整個重來，最多嘗試 RETRY_COUNT+1 次，還是失敗才真的放棄跳下一個
+-- 包一層重試：失敗就整個重來，最多嘗試 RETRY_COUNT+1 次，還是失敗才真的放棄跳下一個。
+-- 回傳最終處理結果分類，供最後彙總回報使用。
 local function tendOnePlot(entity)
     for attempt = 1, RETRY_COUNT + 1 do
-        local ok = tendOnePlotOnce(entity)
-        if ok then return end
+        local ok, category = tendOnePlotOnce(entity)
+        if ok then return category end
         if attempt <= RETRY_COUNT then
             Dalamud.Log(string.format("這個物件處理失敗，重試第 %d 次", attempt))
             yield("/wait 0.5")
@@ -392,15 +396,28 @@ local function tendOnePlot(entity)
             Dalamud.Log("重試後仍然失敗，放棄這個物件，繼續下一個")
         end
     end
+    return "failed"
 end
 
 local plots = findNearbyPlots()
 Dalamud.Log(string.format("找到 %d 個附近的種植物件", #plots))
 
+local summary = {
+    harvested = 0, fertilized = 0, cared = 0, sown = 0,
+    skipped = 0, withered = 0, unknown = 0, failed = 0,
+}
+
 for i, plot in ipairs(plots) do
     Dalamud.Log(string.format("正在照料第 %d/%d 個種植物件", i, #plots))
-    tendOnePlot(plot)
+    local category = tendOnePlot(plot)
+    summary[category] = (summary[category] or 0) + 1
     yield("/wait 0.15")
 end
 
 Dalamud.Log("所有附近種植物件處理完畢。")
+
+local report = string.format(
+    "庭院整理完畢，共 %d 個物件：收穫重種 %d、施肥 %d、護理 %d、播種 %d、跳過 %d、枯萎待處理 %d、未知狀態 %d、失敗 %d",
+    #plots, summary.harvested, summary.fertilized, summary.cared, summary.sown,
+    summary.skipped, summary.withered, summary.unknown, summary.failed)
+yield("/echo " .. report)
