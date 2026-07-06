@@ -1,44 +1,56 @@
 --[[
-自動照料庭院種植物件（園圃/花盆，依實際狀態判斷 護理/施肥/跳過）
+自動照料庭院種植物件（園圃/花盆），依實際狀態判斷 護理/施肥/收穫+重新種植/跳過
 
-前提（已透過實機截圖 + 玩家回報確認）：
+前提（已透過實機截圖 + 玩家回報 + 實測驗證）：
   - 可互動物件的顯示名稱：庭院「園圃」，或各種「XX花盆」（海濱花盆/林間花盆/綠洲花盆...）
   - 狀態文字不是來自 SelectString 的選項內容，是互動當下跳出的聊天/系統訊息
     （例如「風茄正茁壯成長。」「黃麻正...狀態不太好...」），格式是"植物名+狀態片語"，
     所以用「包含」比對而不是完全相等。
-    -> 這需要新增的 Chat 模組（Chat.ClearLastMessage/Chat.GetLastMessage）才能讀到，
-       屬於 C# 端變更，需要重新編譯 SomethingNeedDoing.dll 才會生效。
   - 依訊息內容判斷狀態：
       * 含「狀態不太好」：需要護理，選項 施肥/護理/處理/取消 -> 先護理再施肥
       * 含「茁壯成長」：健康，選項 施肥/護理/處理/取消 -> 直接施肥,不用護理
-      * 含「已經成熟了」：可收穫，選項 收穫/取消 -> 選取消,留給玩家自己手動收穫
+      * 含「已經成熟了」：可收穫 -> 只有目標作物（虛無界風茄）會自動收穫並重新種植，
+        其他作物一律跳過不動，留給玩家自己手動收穫
       * 含「已經枯萎了」：需要人工處理 -> 選取消,不自動處理
-      * 含「沒有種」：空花盆/空園圃 -> 選取消,跳過
+      * 含「沒有種」：空花盆/空園圃 -> 自動播種目標作物（虛無界風茄 + 園藝土壤）
   - SelectString 選項在畫面上的顯示順序，就是 /callback 用的 0-based index
+  - 選「播種」後跳出的是 HousingGardening addon（土壤與種子兩個拖曳格 + 確定/取消按鈕），
+    土壤格/種子格可以程式化模擬右鍵（DragDropClick 事件，which=1 是土壤格、which=2 是
+    種子格），跳出 ContextIconMenu 後依道具名稱選取，確定按鈕是 node id=8，最後跳標準
+    SelectYesno 二次確認，選「是」(index 0) 完成種植。
 
-如果之後遇到訊息內容跟上面幾種狀況都不一樣（fallback 會直接選取消跳過並
-記錄捕捉到的訊息文字），把訊息內容或截圖給我，我再補上對應規則。
+單一物件處理中途卡住（互動失敗、逾時等）會整個重試一次，而不是直接放棄跳下一個。
 ]]
+
+local TARGET_PLANT_NAME = "虛無界風茄" -- 只收穫並重新種植這個作物，其他成熟作物一律跳過不動
+local SEED_ITEM_NAME = "虛無界風茄"    -- 種子道具名稱跟作物同名
+local SOIL_ITEM_NAME = "園藝土壤"
+local CONFIRM_BUTTON_NODE_ID = 8 -- HousingGardening 的「確定」按鈕
+local SOIL_SLOT_WHICH = 1
+local SEED_SLOT_WHICH = 2
+
+local RETRY_COUNT = 1 -- 單一物件處理失敗時，額外重試的次數（不含第一次嘗試）
 
 -- 可種植物件的名稱規則：庭院的「園圃」，以及各種「XX花盆」（海濱花盆/林間花盆/綠洲花盆...）
 local function isPlantableName(name)
     return name == "園圃" or name:match("花盆$") ~= nil or name:match("花圃$") ~= nil
 end
 
-local INTERACT_RANGE = 3.0   -- 互動距離（碼）。太大會選到超出實際互動範圍的物件，導致「距離太遠」
+local INTERACT_RANGE = 5.0   -- 互動距離（碼）。太大會選到超出實際互動範圍的物件，導致「距離太遠」
 local MAX_OBJECT_INDEX = 599 -- 物件表掃描上限
 
 local NEEDS_CARE_TEXT = "狀態不太好"
 local HEALTHY_TEXT = "茁壯成長"
 local MATURE_TEXT = "已經成熟了"
 local WITHERED_TEXT = "已經枯萎了"
+local EMPTY_POT_TEXT = "沒有種" -- 涵蓋「花盆裡沒有種任何東西」「園圃...沒有種...」等各種容器的空盆訊息
 local HARVEST_LABEL = "收穫"
 local CARE_LABEL = "護理"
 local FERTILIZE_LABEL = "施肥"
+local SOW_LABEL = "播種"
 local CANCEL_LABEL = "取消"
 local FERTILIZER_ITEM_LABEL = "魚粉" -- 選施肥後，還會跳一層選擇肥料道具的選單
 local ALREADY_FERTILIZED_TEXT = "已經施加了足夠的肥料了"
-local EMPTY_POT_TEXT = "沒有種" -- 涵蓋「花盆裡沒有種任何東西」「園圃...沒有種...」等各種容器的空盆訊息
 
 -- 掃描附近所有名稱符合、距離內的種植物件
 local function findNearbyPlots()
@@ -92,6 +104,11 @@ local function selectOption(index)
     yield("/wait 0.15")
 end
 
+local function cancelIfPossible(options)
+    local idx = optionIndex(options, CANCEL_LABEL)
+    if idx then selectOption(idx) end
+end
+
 -- 輪詢等待某個 addon 準備好，比固定 wait 更快也更穩
 -- 注意：每次 yield 都是一次完整的 native 指令派送，實際耗時比 interval 數字大，
 -- 所以 timeoutMs 需要抓寬鬆一點，避免明明互動成功卻被判定逾時而誤跳過
@@ -122,9 +139,11 @@ local function waitForSelectStringAfterInteract(timeoutMs)
     return Addons.GetAddon("SelectString").Ready
 end
 
-local function cancelIfPossible(options)
-    local idx = optionIndex(options, CANCEL_LABEL)
-    if idx then selectOption(idx) end
+local function logVisibleAddons(prefix)
+    local names = Addons.GetVisibleAddonNames()
+    local parts = {}
+    for i = 0, names.Count - 1 do table.insert(parts, names[i]) end
+    Dalamud.Log(string.format("%s 可見視窗=[%s]", prefix, table.concat(parts, ",")))
 end
 
 local function findItemByName(name)
@@ -174,8 +193,94 @@ local function tryChooseFertilizerItem()
     yield("/wait 0.1")
 end
 
--- 對單一種植物件執行：互動 -> 讀狀態訊息 -> 依狀態決定動作
-local function tendOnePlot(entity)
+-- 對 HousingGardening 的土壤/種子拖曳格模擬右鍵，跳出 ContextIconMenu 後依道具名稱選取
+-- （用 SelectContextIconMenuEntryByText 依名稱比對，背包裡同時有多種土壤/種子時也能選對）
+local function fillDragDropSlot(which, itemLabel)
+    local gardening = Addons.GetAddon("HousingGardening")
+    gardening:RightClickDragDropSlot(which)
+
+    if not waitForAddonReady("ContextIconMenu", 1500) then
+        Dalamud.Log(string.format("右鍵 %s 格沒有跳出選擇道具選單，中止種植，請人工處理", itemLabel))
+        return false
+    end
+
+    if not Addons.SelectContextIconMenuEntryByText(itemLabel) then
+        Dalamud.Log(string.format("選單裡找不到「%s」，中止種植，請人工處理", itemLabel))
+        return false
+    end
+    yield("/wait 0.2")
+    return true
+end
+
+-- 選「播種」之後：HousingGardening 開啟 -> 填土壤 -> 填種子 -> 點確定 -> SelectYesno 選是
+local function trySowSeed()
+    if not waitForAddonReady("HousingGardening", 2000) then
+        logVisibleAddons("播種後沒看到 HousingGardening")
+        return false
+    end
+
+    if not fillDragDropSlot(SOIL_SLOT_WHICH, SOIL_ITEM_NAME) then return false end
+    if not fillDragDropSlot(SEED_SLOT_WHICH, SEED_ITEM_NAME) then return false end
+
+    local gardening = Addons.GetAddon("HousingGardening")
+    if not gardening:ClickButton(CONFIRM_BUTTON_NODE_ID) then
+        Dalamud.Log("點擊確定按鈕失敗（可能還沒填滿或按鈕被擋），中止種植，請人工處理")
+        return false
+    end
+
+    if waitForAddonReady("SelectYesno", 1500) then
+        yield('/callback "SelectYesno" true 0') -- 是
+        yield("/wait 0.3")
+        Dalamud.Log(string.format("已確認種植 %s，結果：%s", SEED_ITEM_NAME, tostring(Chat.GetLastMessage())))
+        return true
+    end
+
+    Dalamud.Log("點確定後沒看到 SelectYesno 二次確認，請自行確認種植狀態")
+    return false
+end
+
+-- 收穫後理論上會立刻變空，重新互動一次進入播種流程
+local function harvestThenReplant(entity, options)
+    Dalamud.Log("收穫中")
+    local harvestIdx = optionIndex(options, HARVEST_LABEL)
+    if not harvestIdx then
+        Dalamud.Log("找不到收穫選項，取消跳過")
+        cancelIfPossible(options)
+        return false
+    end
+    Chat.ClearLastMessage()
+    selectOption(harvestIdx)
+    Dalamud.Log(string.format("收穫結果：%s", tostring(Chat.GetLastMessage())))
+
+    yield("/wait 0.8") -- 收穫動畫/狀態更新需要一點緩衝時間，太快重新互動會抓不到
+    Chat.ClearLastMessage()
+    entity:Interact()
+    if not waitForSelectStringAfterInteract(4000) then
+        logVisibleAddons("收穫後重新互動逾時")
+        Dalamud.Log(string.format("收穫後重新互動失敗：%s", tostring(Chat.GetLastMessage())))
+        return false
+    end
+
+    local msg = Chat.GetLastMessage()
+    if msg == nil or not msg:find(EMPTY_POT_TEXT, 1, true) then
+        Dalamud.Log(string.format("收穫後預期是空盆，但訊息是 [%s]，中止自動種植，請人工確認", tostring(msg)))
+        cancelIfPossible(readSelectStringOptions())
+        return false
+    end
+
+    local options2 = readSelectStringOptions()
+    local sowIdx = optionIndex(options2, SOW_LABEL)
+    if not sowIdx then
+        Dalamud.Log("找不到播種選項，取消跳過")
+        cancelIfPossible(options2)
+        return false
+    end
+    selectOption(sowIdx)
+    return trySowSeed()
+end
+
+-- 對單一種植物件執行一次：互動 -> 讀狀態訊息 -> 依狀態決定動作。回傳 true/false 代表這次有沒有順利跑完。
+local function tendOnePlotOnce(entity)
     Chat.ClearLastMessage()
     entity:SetAsTarget()
     yield("/wait 0.15")
@@ -186,9 +291,9 @@ local function tendOnePlot(entity)
         local names = Addons.GetVisibleAddonNames()
         local parts = {}
         for i = 0, names.Count - 1 do table.insert(parts, names[i]) end
-        Dalamud.Log(string.format("互動失敗（可能距離太遠或已被其他效果擋住），跳過：%s [Exists=%s Ready=%s] 可見視窗=[%s]",
+        Dalamud.Log(string.format("互動失敗（可能距離太遠或已被其他效果擋住）：%s [Exists=%s Ready=%s] 可見視窗=[%s]",
             tostring(Chat.GetLastMessage()), tostring(addon.Exists), tostring(addon.Ready), table.concat(parts, ",")))
-        return
+        return false
     end
 
     local statusMsg = Chat.GetLastMessage()
@@ -196,27 +301,37 @@ local function tendOnePlot(entity)
     local options = readSelectStringOptions()
     Dalamud.LogDebug(string.format("訊息=[%s] 狀態=[%s] 選項=[%s]", tostring(statusMsg), tostring(status), table.concat(options, ",")))
 
+    if statusMsg == nil then statusMsg = "" end
+
     -- 沒抓到已知狀態文字，但選單只有 收穫/取消 兩項，也視為已成熟
     if status == nil and #options == 2 and optionIndex(options, HARVEST_LABEL) ~= nil then
         status = MATURE_TEXT
     end
 
-    if status == MATURE_TEXT then
-        Dalamud.Log("已經成熟了，可收穫，跳過，請手動收穫")
+    if status == EMPTY_POT_TEXT then
+        local sowIdx = optionIndex(options, SOW_LABEL)
+        if sowIdx then
+            Dalamud.Log("空盆，嘗試播種 " .. SEED_ITEM_NAME)
+            selectOption(sowIdx)
+            return trySowSeed()
+        end
         cancelIfPossible(options)
-        return
+        return true -- 沒有播種選項就是正常跳過，不算失敗
+    end
+
+    if status == MATURE_TEXT then
+        if statusMsg:find(TARGET_PLANT_NAME, 1, true) then
+            return harvestThenReplant(entity, options)
+        end
+        Dalamud.LogDebug("已成熟但不是目標作物，跳過：" .. statusMsg)
+        cancelIfPossible(options)
+        return true
     end
 
     if status == WITHERED_TEXT then
         Dalamud.Log("已經枯萎了，跳過，需要人工處理")
         cancelIfPossible(options)
-        return
-    end
-
-    if status == EMPTY_POT_TEXT then
-        Dalamud.LogDebug("空花盆，跳過")
-        cancelIfPossible(options)
-        return
+        return true
     end
 
     if status == NEEDS_CARE_TEXT then
@@ -228,8 +343,8 @@ local function tendOnePlot(entity)
             -- 護理後選單關閉，重新互動才能選施肥
             entity:Interact()
             if not waitForSelectStringAfterInteract(3000) then
-                Dalamud.Log("護理後重新互動失敗，跳過施肥")
-                return
+                Dalamud.Log("護理後重新互動失敗")
+                return false
             end
             local options2 = readSelectStringOptions()
             local fertIdx = optionIndex(options2, FERTILIZE_LABEL)
@@ -243,7 +358,7 @@ local function tendOnePlot(entity)
             Dalamud.Log("狀態不太好，但找不到護理選項，取消跳過")
             cancelIfPossible(options)
         end
-        return
+        return true
     end
 
     if status == HEALTHY_TEXT then
@@ -256,12 +371,27 @@ local function tendOnePlot(entity)
         else
             cancelIfPossible(options)
         end
-        return
+        return true
     end
 
     -- 不認得的狀態，安全起見取消跳過
     Dalamud.Log(string.format("未知狀態訊息 [%s]，取消跳過，請回報這則訊息內容", tostring(statusMsg)))
     cancelIfPossible(options)
+    return true
+end
+
+-- 包一層重試：失敗就整個重來，最多嘗試 RETRY_COUNT+1 次，還是失敗才真的放棄跳下一個
+local function tendOnePlot(entity)
+    for attempt = 1, RETRY_COUNT + 1 do
+        local ok = tendOnePlotOnce(entity)
+        if ok then return end
+        if attempt <= RETRY_COUNT then
+            Dalamud.Log(string.format("這個物件處理失敗，重試第 %d 次", attempt))
+            yield("/wait 0.5")
+        else
+            Dalamud.Log("重試後仍然失敗，放棄這個物件，繼續下一個")
+        end
+    end
 end
 
 local plots = findNearbyPlots()

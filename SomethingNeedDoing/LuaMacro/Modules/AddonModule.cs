@@ -98,12 +98,18 @@ public unsafe class AddonModule : LuaModuleBase
         if (addonPtr == null || !IsAddonReady(addonPtr))
             return false;
 
+        // Entry item names start at raw AtkValues offset 7 (mirrors ContextMenu's confirmed
+        // offset=7 convention), so entry index = raw text position - 7. Only verified against
+        // a single-entry menu so far (text found at position 7 -> entry index 0); multi-entry
+        // spacing (whether each entry occupies exactly one string slot, contiguous) is inferred
+        // from that convention, not independently confirmed.
+        const int EntryTextOffset = 7;
         var wrapper = new AddonWrapper("ContextIconMenu");
         var texts = wrapper.GetValueTexts();
-        for (var i = 0; i < texts.Count; i++)
+        for (var i = EntryTextOffset; i < texts.Count; i++)
         {
             if (texts[i].Contains(containsText))
-                return SelectContextIconMenuEntry(0); // single-entry case confirmed; multi-entry index mapping not yet verified
+                return SelectContextIconMenuEntry(i - EntryTextOffset);
         }
         return false;
     }
