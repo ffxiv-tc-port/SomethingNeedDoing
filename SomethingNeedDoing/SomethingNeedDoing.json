@@ -1,12 +1,12 @@
 {
-  "Author": "daemitus, croizat",
+  "Author": "daemitus, croizat, Lother",
   "Name": "Something Need Doing",
-  "Punchline": "Work work.",
-  "Description": "Now for more than crafting!",
+  "Punchline": "工作，工作。",
+  "Description": "現在不只能用於生產，功能更多！",
   "ApplicableVersion": "any",
   "DalamudApiLevel": 12,
-  "RepoUrl": "https://github.com/Jaksuhn/SomethingNeedDoing",
-  "IconUrl": "https://raw.githubusercontent.com/Jaksuhn/SomethingNeedDoing/master/res/orc2.png",
+  "RepoUrl": "https://github.com/Lother/SomethingNeedDoing",
+  "IconUrl": "https://raw.githubusercontent.com/Lother/SomethingNeedDoing/tc-7.15/res/icon.png",
   "Tags": [
     "crafting", "automation", "macros", "lua", "scripting"
   ]
