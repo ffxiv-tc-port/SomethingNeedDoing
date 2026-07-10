@@ -9,8 +9,8 @@
   - 依訊息內容判斷狀態：
       * 含「狀態不太好」：需要護理，選項 施肥/護理/處理/取消 -> 先護理再施肥
       * 含「茁壯成長」：健康，選項 施肥/護理/處理/取消 -> 直接施肥,不用護理
-        （目標作物「虛無界風茄」種植後不施肥，取消跳過；用位置記錄檔判斷是不是我們自己種
-        的目標作物，不靠訊息裡的植物名稱文字比對，見 tend_garden_state.txt）
+        （目標作物「虛無界風茄」種植後不施肥，取消跳過；純靠訊息裡的植物名稱文字比對判斷，
+        訊息可能只顯示簡稱，比對不一定準，但目前沒有更可靠的方式）
       * 含「已經成熟了」：可收穫 -> 只有目標作物（虛無界風茄）會自動收穫並重新種植，
         其他作物一律跳過不動，留給玩家自己手動收穫
       * 含「已經枯萎了」：需要人工處理 -> 選取消,不自動處理
@@ -21,6 +21,10 @@
     土壤格/種子格可以程式化模擬右鍵（DragDropClick 事件，which=1 是土壤格、which=2 是
     種子格），跳出 ContextIconMenu 後依道具名稱選取，確定按鈕是 node id=8，最後跳標準
     SelectYesno 二次確認，選「是」(index 0) 完成種植。
+  - 收穫後會跳出 HousingHarvest 收穫結果提示視窗（沒有按鈕，會自動消失），實測不影響後續
+    互動流程，不用特地等它消失。
+  - 如果有其他外掛（例如自動園藝類）搶先攔截「播種」互動、直接用固定的土壤+種子瞬間種下，
+    不會讓 HousingGardening 視窗跳出來——這種情況要重新互動確認目前狀態，不能直接判定失敗。
 
 單一物件處理中途卡住（互動失敗、逾時等）會整個重試一次，而不是直接放棄跳下一個。
 ]]
@@ -34,53 +38,11 @@ local SEED_SLOT_WHICH = 2
 
 local RETRY_COUNT = 1 -- 單一物件處理失敗時，額外重試的次數（不含第一次嘗試）
 
--- 記住「這個位置是我們自己種的目標作物」，跨次執行都能直接查表判斷要不要施肥，
--- 不用每次都靠互動當下的狀態訊息去猜植物名稱（訊息裡植物名可能是簡稱，例如「風茄」
--- 而不是完整的「虛無界風茄」，文字比對不一定比對得到）。
--- 狀態檔存在腳本檔案旁邊，key 是座標四捨五入到小數點一位（花圃/花盆不會移動，足夠當穩定 key）。
-local function scriptDir()
-    local src = debug.getinfo(1, "S").source
-    if src:sub(1, 1) == "@" then src = src:sub(2) end
-    return src:match("(.*[/\\])") or ""
-end
-local STATE_FILE = scriptDir() .. "tend_garden_state.txt"
-
-local function positionKey(entity)
-    local p = entity.Position
-    return string.format("%.1f,%.1f,%.1f", p.X, p.Y, p.Z)
-end
-
-local function loadPlantedTargetPlots()
-    local set = {}
-    local f = io.open(STATE_FILE, "r")
-    if f then
-        for line in f:lines() do
-            if line ~= "" then set[line] = true end
-        end
-        f:close()
-    end
-    return set
-end
-
-local plantedTargetPlots = loadPlantedTargetPlots()
-
-local function savePlantedTargetPlots()
-    local f = io.open(STATE_FILE, "w")
-    if not f then
-        Dalamud.Log("無法寫入狀態檔 " .. STATE_FILE .. "，這次的種植記錄不會保存")
-        return
-    end
-    for key in pairs(plantedTargetPlots) do
-        f:write(key .. "\n")
-    end
-    f:close()
-end
-
--- 成功種下目標作物後呼叫：記住這個位置，下次看到「健康」狀態就不用再猜植物名稱
-local function markTargetPlanted(entity)
-    plantedTargetPlots[positionKey(entity)] = true
-    savePlantedTargetPlots()
-end
+-- 曾經嘗試過用座標記錄「這個位置種了什麼」跨次執行查表（省去每次都用訊息文字猜），也試過
+-- 用座標做冷卻機制跳過短期內不需要再檢查的地壟。兩者都在同一個「園圃」底下的多個地壟座標
+-- 完全相同（已實測確認）這件事上失敗——地壟身分沒辦法在互動前確認，用座標記錄或冷卻都會
+-- 把不同地壟的紀錄搞混。所以最後放棄跨次執行的持久化記錄，單純依賴每次互動當下的訊息文字
+-- 比對，雖然多花一點互動次數，但不會有記錄互相污染的風險。
 
 -- 可種植物件的名稱規則：庭院的「園圃」，以及各種「XX花盆」（海濱花盆/林間花盆/綠洲花盆...）
 local function isPlantableName(name)
@@ -263,11 +225,32 @@ local function fillDragDropSlot(which, itemLabel)
     return true
 end
 
--- 選「播種」之後：HousingGardening 開啟 -> 填土壤 -> 填種子 -> 點確定 -> SelectYesno 選是
-local function trySowSeed()
-    if not waitForAddonReady("HousingGardening", 2000) then
-        logVisibleAddons("播種後沒看到 HousingGardening")
+-- 另一個外掛（自動園藝類）可能會搶先攔截「播種」互動，直接用固定的土壤+種子瞬間種下，
+-- 不會讓 HousingGardening 視窗跳出來，導致我們自己等視窗的邏輯永遠等不到。
+-- 重新互動確認目前狀態，如果已經變成「健康 + 目標作物」，代表已經被瞬間種下成功。
+local function checkAlreadyAutoSown(entity)
+    yield("/wait 0.3")
+    Chat.ClearLastMessage()
+    entity:Interact()
+    if not waitForSelectStringAfterInteract(3000) then
         return false
+    end
+    local msg = Chat.GetLastMessage()
+    local status = classifyStatus(msg)
+    local isAutoSown = status == HEALTHY_TEXT and msg ~= nil and msg:find(TARGET_PLANT_NAME, 1, true) ~= nil
+    if isAutoSown then
+        Dalamud.Log(string.format("偵測到已被瞬間種下（可能是其他外掛搶先處理），訊息=[%s]，視為完成", msg))
+    end
+    cancelIfPossible(readSelectStringOptions())
+    return isAutoSown
+end
+
+-- 選「播種」之後：HousingGardening 開啟 -> 填土壤 -> 填種子 -> 點確定 -> SelectYesno 選是
+local function trySowSeed(entity)
+    if not waitForAddonReady("HousingGardening", 200) then
+        -- 沒開起來：可能是其他外掛（自動園藝類）搶先攔截、直接瞬間種下，改確認目前實際狀態
+        logVisibleAddons("播種後沒看到 HousingGardening，改確認是否已被其他外掛瞬間種下")
+        return checkAlreadyAutoSown(entity)
     end
 
     if not fillDragDropSlot(SOIL_SLOT_WHICH, SOIL_ITEM_NAME) then return false end
@@ -303,7 +286,9 @@ local function harvestThenReplant(entity, options)
     selectOption(harvestIdx)
     Dalamud.Log(string.format("收穫結果：%s", tostring(Chat.GetLastMessage())))
 
-    yield("/wait 0.8") -- 收穫動畫/狀態更新需要一點緩衝時間，太快重新互動會抓不到
+    -- HousingHarvest 收穫結果提示視窗實測不影響後續操作（不會擋住播種視窗），不用特地等它
+    -- 消失。trySowSeed 內仍保留了它擋住播種視窗時的備援處理，真的遇到再說。
+    yield("/wait 0.4") -- 收穫動畫/狀態更新需要一點緩衝時間，太快重新互動會抓不到
     Chat.ClearLastMessage()
     entity:Interact()
     if not waitForSelectStringAfterInteract(4000) then
@@ -327,9 +312,7 @@ local function harvestThenReplant(entity, options)
         return false
     end
     selectOption(sowIdx)
-    local ok = trySowSeed()
-    if ok then markTargetPlanted(entity) end
-    return ok
+    return trySowSeed(entity)
 end
 
 -- 對單一種植物件執行一次：互動 -> 讀狀態訊息 -> 依狀態決定動作。
@@ -367,8 +350,7 @@ local function tendOnePlotOnce(entity)
         if sowIdx then
             Dalamud.Log("空盆，嘗試播種 " .. SEED_ITEM_NAME)
             selectOption(sowIdx)
-            local ok = trySowSeed()
-            if ok then markTargetPlanted(entity) end
+            local ok = trySowSeed(entity)
             -- 空盆本身不是錯誤（可能只是暫時沒種子/土壤），不觸發同一個點的重試
             return true, (ok and "sown" or "skipped")
         end
@@ -420,9 +402,9 @@ local function tendOnePlotOnce(entity)
     end
 
     if status == HEALTHY_TEXT then
-        -- 優先查「這個位置是不是我們自己種的目標作物」記錄，不用靠訊息裡的植物名稱文字比對
-        -- （訊息可能只顯示簡稱，例如「風茄」而不是完整的「虛無界風茄」，比對不一定準）
-        local isTargetPlot = plantedTargetPlots[positionKey(entity)] or statusMsg:find(TARGET_PLANT_NAME, 1, true)
+        -- 訊息可能只顯示簡稱（例如「風茄」而不是完整的「虛無界風茄」），比對不一定能對到，
+        -- 但目前沒有更可靠的方式能在不互動的情況下先確認這是不是目標作物
+        local isTargetPlot = statusMsg:find(TARGET_PLANT_NAME, 1, true)
         if isTargetPlot then
             Dalamud.LogDebug(TARGET_PLANT_NAME .. " 種植後不施肥，取消跳過")
             cancelIfPossible(options)
@@ -473,6 +455,7 @@ local summary = {
 for i, plot in ipairs(plots) do
     Dalamud.Log(string.format("正在照料第 %d/%d 個種植物件", i, #plots))
     local category = tendOnePlot(plot)
+    Dalamud.Log(string.format("第 %d/%d 個種植物件處理結果：%s", i, #plots, category))
     summary[category] = (summary[category] or 0) + 1
     -- 種植後（播種/收穫重種）跟下一個點互動前多留 500ms，避免動畫/狀態還沒更新完就互動
     local nextDelay = (category == "sown" or category == "harvested") and 0.65 or 0.15
@@ -485,4 +468,5 @@ local report = string.format(
     "庭院整理完畢，共 %d 個物件：收穫重種 %d、施肥 %d、護理 %d、播種 %d、跳過 %d、枯萎待處理 %d、未知狀態 %d、失敗 %d",
     #plots, summary.harvested, summary.fertilized, summary.cared, summary.sown,
     summary.skipped, summary.withered, summary.unknown, summary.failed)
+Dalamud.Log(report)
 yield("/echo " .. report)
