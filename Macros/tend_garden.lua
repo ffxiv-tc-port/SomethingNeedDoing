@@ -9,10 +9,13 @@
   - 依訊息內容判斷狀態：
       * 含「狀態不太好」：需要護理，選項 施肥/護理/處理/取消 -> 先護理再施肥
       * 含「茁壯成長」：健康，選項 施肥/護理/處理/取消 -> 直接施肥,不用護理
+        （目標作物「虛無界風茄」種植後不施肥，取消跳過；用位置記錄檔判斷是不是我們自己種
+        的目標作物，不靠訊息裡的植物名稱文字比對，見 tend_garden_state.txt）
       * 含「已經成熟了」：可收穫 -> 只有目標作物（虛無界風茄）會自動收穫並重新種植，
         其他作物一律跳過不動，留給玩家自己手動收穫
       * 含「已經枯萎了」：需要人工處理 -> 選取消,不自動處理
       * 含「沒有種」：空花盆/空園圃 -> 自動播種目標作物（虛無界風茄 + 園藝土壤）
+        （空盆本身不視為錯誤，播種失敗也不會重試同一個點）
   - SelectString 選項在畫面上的顯示順序，就是 /callback 用的 0-based index
   - 選「播種」後跳出的是 HousingGardening addon（土壤與種子兩個拖曳格 + 確定/取消按鈕），
     土壤格/種子格可以程式化模擬右鍵（DragDropClick 事件，which=1 是土壤格、which=2 是
@@ -30,6 +33,54 @@ local SOIL_SLOT_WHICH = 1
 local SEED_SLOT_WHICH = 2
 
 local RETRY_COUNT = 1 -- 單一物件處理失敗時，額外重試的次數（不含第一次嘗試）
+
+-- 記住「這個位置是我們自己種的目標作物」，跨次執行都能直接查表判斷要不要施肥，
+-- 不用每次都靠互動當下的狀態訊息去猜植物名稱（訊息裡植物名可能是簡稱，例如「風茄」
+-- 而不是完整的「虛無界風茄」，文字比對不一定比對得到）。
+-- 狀態檔存在腳本檔案旁邊，key 是座標四捨五入到小數點一位（花圃/花盆不會移動，足夠當穩定 key）。
+local function scriptDir()
+    local src = debug.getinfo(1, "S").source
+    if src:sub(1, 1) == "@" then src = src:sub(2) end
+    return src:match("(.*[/\\])") or ""
+end
+local STATE_FILE = scriptDir() .. "tend_garden_state.txt"
+
+local function positionKey(entity)
+    local p = entity.Position
+    return string.format("%.1f,%.1f,%.1f", p.X, p.Y, p.Z)
+end
+
+local function loadPlantedTargetPlots()
+    local set = {}
+    local f = io.open(STATE_FILE, "r")
+    if f then
+        for line in f:lines() do
+            if line ~= "" then set[line] = true end
+        end
+        f:close()
+    end
+    return set
+end
+
+local plantedTargetPlots = loadPlantedTargetPlots()
+
+local function savePlantedTargetPlots()
+    local f = io.open(STATE_FILE, "w")
+    if not f then
+        Dalamud.Log("無法寫入狀態檔 " .. STATE_FILE .. "，這次的種植記錄不會保存")
+        return
+    end
+    for key in pairs(plantedTargetPlots) do
+        f:write(key .. "\n")
+    end
+    f:close()
+end
+
+-- 成功種下目標作物後呼叫：記住這個位置，下次看到「健康」狀態就不用再猜植物名稱
+local function markTargetPlanted(entity)
+    plantedTargetPlots[positionKey(entity)] = true
+    savePlantedTargetPlots()
+end
 
 -- 可種植物件的名稱規則：庭院的「園圃」，以及各種「XX花盆」（海濱花盆/林間花盆/綠洲花盆...）
 local function isPlantableName(name)
@@ -276,7 +327,9 @@ local function harvestThenReplant(entity, options)
         return false
     end
     selectOption(sowIdx)
-    return trySowSeed()
+    local ok = trySowSeed()
+    if ok then markTargetPlanted(entity) end
+    return ok
 end
 
 -- 對單一種植物件執行一次：互動 -> 讀狀態訊息 -> 依狀態決定動作。
@@ -315,7 +368,9 @@ local function tendOnePlotOnce(entity)
             Dalamud.Log("空盆，嘗試播種 " .. SEED_ITEM_NAME)
             selectOption(sowIdx)
             local ok = trySowSeed()
-            return ok, (ok and "sown" or "failed")
+            if ok then markTargetPlanted(entity) end
+            -- 空盆本身不是錯誤（可能只是暫時沒種子/土壤），不觸發同一個點的重試
+            return true, (ok and "sown" or "skipped")
         end
         cancelIfPossible(options)
         return true, "skipped" -- 沒有播種選項就是正常跳過，不算失敗
@@ -365,6 +420,14 @@ local function tendOnePlotOnce(entity)
     end
 
     if status == HEALTHY_TEXT then
+        -- 優先查「這個位置是不是我們自己種的目標作物」記錄，不用靠訊息裡的植物名稱文字比對
+        -- （訊息可能只顯示簡稱，例如「風茄」而不是完整的「虛無界風茄」，比對不一定準）
+        local isTargetPlot = plantedTargetPlots[positionKey(entity)] or statusMsg:find(TARGET_PLANT_NAME, 1, true)
+        if isTargetPlot then
+            Dalamud.LogDebug(TARGET_PLANT_NAME .. " 種植後不施肥，取消跳過")
+            cancelIfPossible(options)
+            return true, "skipped"
+        end
         local fertIdx = optionIndex(options, FERTILIZE_LABEL)
         if fertIdx then
             Dalamud.LogDebug("茁壯成長，直接施肥")
@@ -411,7 +474,9 @@ for i, plot in ipairs(plots) do
     Dalamud.Log(string.format("正在照料第 %d/%d 個種植物件", i, #plots))
     local category = tendOnePlot(plot)
     summary[category] = (summary[category] or 0) + 1
-    yield("/wait 0.15")
+    -- 種植後（播種/收穫重種）跟下一個點互動前多留 500ms，避免動畫/狀態還沒更新完就互動
+    local nextDelay = (category == "sown" or category == "harvested") and 0.65 or 0.15
+    yield("/wait " .. nextDelay)
 end
 
 Dalamud.Log("所有附近種植物件處理完畢。")
