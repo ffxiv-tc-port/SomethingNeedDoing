@@ -30,8 +30,13 @@ jobs:
       - name: Restore Project
         run: dotnet restore
 
+      - name: Compute version
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "VER=$ver" >> "$GITHUB_ENV"
+
       - name: Build Project
-        run: dotnet build --configuration Release SomethingNeedDoing/SomethingNeedDoing.csproj
+        run: dotnet build --configuration Release SomethingNeedDoing/SomethingNeedDoing.csproj -p:Version=${{ env.VER }} -p:AssemblyVersion=${{ env.VER }} -p:FileVersion=${{ env.VER }}
 
       - name: Release
         uses: softprops/action-gh-release@v2
