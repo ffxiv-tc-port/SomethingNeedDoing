@@ -1,12 +1,13 @@
-name: Build & Publish to Dynamis
+name: Release
 
 on:
   push:
     tags:
-      - 'v*.*'
-
+      - 'v*'
+permissions:
+  contents: write
 jobs:
-  Build:
+  build:
     runs-on: ubuntu-latest
     env:
       DALAMUD_HOME: /tmp/dalamud
@@ -15,64 +16,29 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-          ref: ${{ github.ref_name == 'v*.*-tt' && 'testing' || 'main' }}
-
-      - name: Get Tag Name
-        run: echo "tag=$(echo ${{ github.ref }} | sed 's/refs\/tags\/v//')" >> $GITHUB_ENV
-
-      - name: Determine Publish Type
-        id: publish_type
-        run: |
-          if [[ "${{ env.tag }}" == *-t ]]; then
-            echo "type=testing" >> $GITHUB_OUTPUT
-          else
-            echo "type=latest" >> $GITHUB_OUTPUT
-          fi
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
 
-      - name: Download config.yaml
-        run: curl -L https://raw.githubusercontent.com/goatcorp/dalamud-declarative/main/config.yaml -o config.yaml
-
-      - name: Install yq
+      - name: Download Dalamud (pinned TC-compatible build)
         run: |
-          wget https://github.com/mikefarah/yq/releases/download/v4.34.1/yq_linux_amd64 -O /usr/local/bin/yq
-          chmod +x /usr/local/bin/yq
-
-      - name: Extract Latest Track Name
-        id: latest_track
-        run: |
-          latest_entry=$(yq eval '.tracks | to_entries | sort_by(.value.applicableGameVersion, (.key == "release")) | .[-1]' config.yaml)
-          track_name=$(echo "$latest_entry" | yq eval '.key' -)
-          echo "result=$track_name" >> $GITHUB_OUTPUT
-
-      - name: Download Dalamud Latest
-        run: |
-          if [ "${{ steps.latest_track.outputs.result }}" == "release" ]; then
-              wget https://goatcorp.github.io/dalamud-distrib/latest.zip -O ${{ env.DALAMUD_HOME }}.zip
-          else
-              wget https://goatcorp.github.io/dalamud-distrib/${{ steps.latest_track.outputs.result }}/latest.zip -O ${{ env.DALAMUD_HOME }}.zip
-          fi
-          unzip ${{ env.DALAMUD_HOME }}.zip -d ${{ env.DALAMUD_HOME }}
+          wget https://github.com/Lother/dalamud-tc-pin/releases/download/v12.0.2/dalamud-api12-net9.zip -O ${{ env.DALAMUD_HOME }}.zip
+          unzip ${{ env.DALAMUD_HOME }}.zip -d ${{ env.DALAMUD_HOME }} || true
 
       - name: Restore Project
         run: dotnet restore
 
       - name: Build Project
-        run: dotnet build --configuration Release SomethingNeedDoing/SomethingNeedDoing.csproj -p:AssemblyVersion=${{ env.tag }}
+        run: dotnet build --configuration Release SomethingNeedDoing/SomethingNeedDoing.csproj
 
-      - name: Publish Version
-        uses: PunishXIV/dynamis-action@v1
-        id: dynamis
+      - name: Release
+        uses: softprops/action-gh-release@v2
         with:
-          plugin_id: 25
-          internal_name: 'SomethingNeedDoing'
-          version_number: ${{ env.tag }}
-          path: 'SomethingNeedDoing/bin/Release/SomethingNeedDoing/latest.zip'
-          type: ${{ steps.publish_type.outputs.type }}
-          dalamud_version: '12'
-        env:
-          PUBLISHER_KEY: ${{ secrets.PUBLISHER_KEY }}
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: |
+            SomethingNeedDoing/bin/Release/SomethingNeedDoing/latest.zip
+            SomethingNeedDoing/bin/Release/SomethingNeedDoing/SomethingNeedDoing.json
+          generate_release_notes: true
