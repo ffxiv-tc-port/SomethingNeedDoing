@@ -6,7 +6,7 @@
   "ApplicableVersion": "any",
   "DalamudApiLevel": 12,
   "RepoUrl": "https://github.com/Lother/SomethingNeedDoing",
-  "IconUrl": "https://raw.githubusercontent.com/Lother/SomethingNeedDoing/tc-7.15/res/icon.png",
+  "IconUrl": "https://raw.githubusercontent.com/Lother/DalamudPluginsTC/main/icons/SomethingNeedDoing.png",
   "Tags": [
     "crafting", "automation", "macros", "lua", "scripting"
   ]
