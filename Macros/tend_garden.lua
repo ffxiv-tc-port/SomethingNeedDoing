@@ -379,10 +379,11 @@ local function tendOnePlotOnce(entity)
         if careIdx then
             Dalamud.LogDebug("狀態不太好，先護理")
             selectOption(careIdx)
+            yield("/wait 0.2") -- 護理動畫/狀態更新需要緩衝時間，太快重新互動會抓不到
 
             -- 護理後選單關閉，重新互動才能選施肥
             entity:Interact()
-            if not waitForSelectStringAfterInteract(3000) then
+            if not waitForSelectStringAfterInteract(500) then
                 Dalamud.Log("護理後重新互動失敗")
                 return false, "failed"
             end
