@@ -38,12 +38,16 @@ jobs:
       - name: Build Project
         run: dotnet build --configuration Release SomethingNeedDoing/SomethingNeedDoing.csproj -p:Version=${{ env.VER }} -p:AssemblyVersion=${{ env.VER }} -p:FileVersion=${{ env.VER }}
 
+      - name: Rename artifact to SomethingNeedDoing.zip
+        run: |
+          zip_path=$(find . -name latest.zip | head -1)
+          cp "$zip_path" "SomethingNeedDoing.zip"
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           files: |
-            SomethingNeedDoing/bin/Release/SomethingNeedDoing/latest.zip
+            SomethingNeedDoing.zip
             SomethingNeedDoing/bin/Release/SomethingNeedDoing/SomethingNeedDoing.json
           generate_release_notes: true
