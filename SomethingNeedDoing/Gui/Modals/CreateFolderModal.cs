@@ -36,12 +36,12 @@ public static class CreateFolderModal
 
         ImGuiEx.Icon(FontAwesomeHelper.IconFolder);
         ImGui.SameLine();
-        ImGui.Text("Create New Folder");
+        ImGui.Text("建立新資料夾");
         ImGui.Separator();
         ImGui.Spacing();
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("Name:");
+        ImGui.Text("名稱:");
 
         ImGui.SameLine();
         ImGuiUtils.SetFocusIfAppearing();
@@ -51,7 +51,7 @@ public static class CreateFolderModal
         ImGui.Spacing();
         ImGui.Spacing();
 
-        ImGuiUtils.CenteredButtons(("Create", () =>
+        ImGuiUtils.CenteredButtons(("建立", () =>
         {
             var folderExists = false;
             foreach (var macro in C.Macros)
@@ -79,6 +79,6 @@ public static class CreateFolderModal
                 Close();
             }
         }
-        ), ("Cancel", Close));
+        ), ("取消", Close));
     }
 }

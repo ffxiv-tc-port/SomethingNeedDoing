@@ -38,7 +38,7 @@ public class HelpCommandsTab
     public void DrawTab()
     {
         using var child = ImRaii.Child(nameof(HelpCommandsTab));
-        ImGuiUtils.Section("Commands", () =>
+        ImGuiUtils.Section("指令", () =>
         {
             foreach (var (name, info) in Commands.OrderBy(x => x.Key))
             {
@@ -52,7 +52,7 @@ public class HelpCommandsTab
             }
         });
 
-        ImGuiUtils.Section("Modifiers", () =>
+        ImGuiUtils.Section("修飾詞", () =>
         {
             foreach (var (name, info) in Modifiers.OrderBy(x => x.Key))
             {

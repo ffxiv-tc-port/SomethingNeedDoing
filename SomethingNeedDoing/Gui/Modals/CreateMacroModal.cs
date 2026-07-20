@@ -45,11 +45,11 @@ public class CreateMacroModal(GitMacroManager gitManager)
 
         ImGuiEx.Icon(FontAwesomeHelper.IconNew);
         ImGui.SameLine();
-        ImGui.Text("Create New Macro");
+        ImGui.Text("建立新巨集");
         ImGui.Separator();
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("Name:");
+        ImGui.Text("名稱:");
 
         ImGui.SameLine();
         ImGuiUtils.SetFocusIfAppearing();
@@ -59,19 +59,19 @@ public class CreateMacroModal(GitMacroManager gitManager)
         ImGui.Spacing();
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("Type:");
+        ImGui.Text("類型:");
         ImGui.SameLine();
 
         _newMacroType = ImGuiUtils.EnumRadioButtons(_newMacroType);
 
         ImGui.Spacing();
 
-        ImGuiUtils.Section("Optional: Import from Github", () =>
+        ImGuiUtils.Section("選填: 從 Github 匯入", () =>
         {
             ImGui.AlignTextToFramePadding();
-            ImGui.Text("GitHub URL:");
+            ImGui.Text("GitHub 網址:");
             ImGui.SameLine();
-            ImGuiEx.Tooltip("Enter a GitHub URL (e.g., https://github.com/owner/repo/blob/branch/path)");
+            ImGuiEx.Tooltip("輸入 GitHub 網址 (例如: https://github.com/owner/repo/blob/branch/path)");
 
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             ImGui.InputText("##GitHubUrl", ref _githubUrl, 500);
@@ -87,10 +87,10 @@ public class CreateMacroModal(GitMacroManager gitManager)
         ImGui.Spacing();
 
         if (_isImporting)
-            ImGuiUtils.CenteredButtons(("Importing...", () => { }));
+            ImGuiUtils.CenteredButtons(("匯入中...", () => { }));
         else
         {
-            ImGuiUtils.CenteredButtons(("Create", async () =>
+            ImGuiUtils.CenteredButtons(("建立", async () =>
             {
                 if (!string.IsNullOrWhiteSpace(_githubUrl))
                     await ImportFromGitHub();
@@ -110,7 +110,7 @@ public class CreateMacroModal(GitMacroManager gitManager)
                     Close();
                 }
             }
-            ), ("Cancel", Close));
+            ), ("取消", Close));
         }
     }
 
@@ -134,7 +134,7 @@ public class CreateMacroModal(GitMacroManager gitManager)
         }
         catch (Exception ex)
         {
-            _importError = $"Failed to import from GitHub: {ex.Message}";
+            _importError = $"從 GitHub 匯入失敗: {ex.Message}";
             FrameworkLogger.Error(ex, "Failed to import macro from GitHub");
         }
         finally

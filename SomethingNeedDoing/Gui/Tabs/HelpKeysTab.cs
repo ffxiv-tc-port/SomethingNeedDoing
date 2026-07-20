@@ -8,9 +8,9 @@ public static class HelpKeysTab
     public static void DrawTab()
     {
         using var child = ImRaii.Child(nameof(HelpKeysTab));
-        ImGuiUtils.Section("Virtual Keys", () =>
+        ImGuiUtils.Section("虛擬按鍵", () =>
         {
-            ImGui.TextWrapped("Use the /send command to simulate keyboard input. This is useful for interacting with UI elements that don't have dedicated click commands.");
+            ImGui.TextWrapped("使用 /send 指令來模擬鍵盤輸入。這對於與沒有專屬點擊指令的 UI 元素互動非常有用。");
             ImGui.Spacing();
 
             // Get all valid virtual keys

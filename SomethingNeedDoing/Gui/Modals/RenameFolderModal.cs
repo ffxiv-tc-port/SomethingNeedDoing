@@ -39,11 +39,11 @@ public static class RenameFolderModal
 
         ImGuiEx.Icon(FontAwesomeHelper.IconRename);
         ImGui.SameLine();
-        ImGui.Text("Rename Folder");
+        ImGui.Text("重新命名資料夾");
         ImGui.Separator();
         ImGui.Spacing();
 
-        ImGui.Text("Enter new folder name:");
+        ImGui.Text("輸入新的資料夾名稱:");
         ImGui.SetNextItemWidth(-1);
         ImGuiUtils.SetFocusIfAppearing();
 
@@ -60,13 +60,13 @@ public static class RenameFolderModal
         if (!string.IsNullOrEmpty(_renameFolderBuffer) && C.GetFolderPaths().Any(f => f == _renameFolderBuffer))
         {
             invalid = true;
-            ImGuiEx.Text(ImGuiColors.DalamudRed, $"Folder name '{_renameFolderBuffer}' already exists.");
+            ImGuiEx.Text(ImGuiColors.DalamudRed, $"資料夾名稱 '{_renameFolderBuffer}' 已經存在。");
         }
 
         var confirmed = false;
         using (ImRaii.Disabled(invalid))
         using (ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.3f, 1.0f)).Push(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 0.4f, 1.0f)))
-            confirmed = ImGui.Button("Rename", new Vector2(150, 0)) || enterPressed;
+            confirmed = ImGui.Button("重新命名", new Vector2(150, 0)) || enterPressed;
 
         if (confirmed && !string.IsNullOrWhiteSpace(_renameFolderBuffer))
         {
@@ -84,7 +84,7 @@ public static class RenameFolderModal
         ImGui.SameLine();
 
         using (ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.5f, 0.3f, 0.3f, 1.0f)).Push(ImGuiCol.ButtonHovered, new Vector4(0.6f, 0.4f, 0.4f, 1.0f)))
-            if (ImGui.Button("Cancel", new Vector2(150, 0)) || (ImGui.IsKeyPressed(ImGuiKey.Escape) && ImGui.IsWindowFocused()))
+            if (ImGui.Button("取消", new Vector2(150, 0)) || (ImGui.IsKeyPressed(ImGuiKey.Escape) && ImGui.IsWindowFocused()))
                 Close();
     }
 }

@@ -81,15 +81,15 @@ public class MainWindow : Window
         _versionHistoryModal.Draw();
 
         using var _ = ImRaii.TabBar("Tabs");
-        using (var tab = ImRaii.TabItem("MacrosLibrary"))
+        using (var tab = ImRaii.TabItem("巨集庫"))
             if (tab)
                 _macrosTab.Draw();
 
-        using (var tab = ImRaii.TabItem("Help"))
+        using (var tab = ImRaii.TabItem("說明"))
             if (tab)
                 _helpTab.Draw();
 
-        using (var tab = ImRaii.TabItem("Settings"))
+        using (var tab = ImRaii.TabItem("設定"))
             if (tab)
                 SettingsTab.DrawTab();
     }

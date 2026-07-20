@@ -58,27 +58,27 @@ public class ChangelogWindow : Window
 
     private void AddGeneralChangelogs()
     {
-        Add("12.8", "Fixed recursive spawning of temporary macros caused by function-level trigger events");
-        Add("12.9", "Added pause/resume/stop all commands");
-        Add("12.10", "Added a lua stub generator (outputs in config directory, used for script linting) by Faye");
-        Add("12.10", "Fixed native macro execution where waits weren't being applied properly");
-        Add("12.11", "Fixed /loop");
-        Add("12.11", "Fixed craft skip trigger on non craft actions");
-        Add("12.13", "Added imports for all enums, now callable via luanet.enum");
-        Add("12.14", "Added OnCleanup function for lua scripts.");
-        Add("12.15", "Added syntax highlighting to the editor");
-        Add("12.16", "Added type change ability in the editor");
-        Add("12.17", "Fixed Craftloop, and some action skip/waits");
-        Add("12.18", "Fixed autoretainer post process event");
-        Add("12.19", "Added more advanced stub generator by Faye");
-        Add("12.24", "Fixed remote dependencies and added a file cache system");
-        Add("12.25", "Fixed deleting folders. Added renaming folders.");
-        Add("12.35", "Added a config module to provide macros with configurable settings, editable outside of code");
-        Add("12.41", "Added import from url for new macros.");
-        Add("12.53", "Added OnActivePluginsChanged");
-        Add("12.64", "Changed list index modifier name from listindex to list");
-        Add("12.75", "Added duty started/wiped/completed events");
-        Add("12.76", "Fixed git macros resetting configs on update");
+        Add("12.8", "修正函式層級觸發事件造成暫存巨集遞迴產生的問題");
+        Add("12.9", "新增全部暫停/繼續/停止指令");
+        Add("12.10", "新增由 Faye 製作的 lua stub 產生器（輸出於設定目錄，用於腳本檢查）");
+        Add("12.10", "修正原生巨集執行時等待未正確套用的問題");
+        Add("12.11", "修正 /loop");
+        Add("12.11", "修正非製作動作觸發製作跳過的問題");
+        Add("12.13", "新增所有列舉的匯入，現在可透過 luanet.enum 呼叫");
+        Add("12.14", "為 lua 腳本新增 OnCleanup 函式");
+        Add("12.15", "編輯器新增語法高亮");
+        Add("12.16", "編輯器新增變更類型的功能");
+        Add("12.17", "修正 Craftloop 以及部分動作跳過/等待的問題");
+        Add("12.18", "修正 autoretainer 後處理事件");
+        Add("12.19", "新增由 Faye 製作的進階 stub 產生器");
+        Add("12.24", "修正遠端依賴項並新增檔案快取系統");
+        Add("12.25", "修正刪除資料夾的問題，新增重新命名資料夾功能");
+        Add("12.35", "新增設定模組，提供巨集可在程式碼外編輯的可設定選項");
+        Add("12.41", "新增從網址匯入新巨集的功能");
+        Add("12.53", "新增 OnActivePluginsChanged");
+        Add("12.64", "將清單索引修飾詞名稱從 listindex 改為 list");
+        Add("12.75", "新增副本開始/團滅/完成事件");
+        Add("12.76", "修正 git 巨集在更新時重置設定的問題");
     }
 
     private void Add(string version, string description)
