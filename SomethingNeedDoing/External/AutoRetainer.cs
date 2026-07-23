@@ -100,6 +100,10 @@ public class AutoRetainer : IPC
         parameterDescriptions: ["cid"])]
     public readonly Func<ulong, long?> GetClosestRetainerVentureSecondsRemaining = null!;
 
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(description: "Retrieves one item slot from the currently open retainer's inventory into the player's own bags, without waiting to confirm it landed. Returns false once nothing is left or the player's inventory is nearly full; loop this with a short yield between calls.")]
+    public readonly Func<bool> RetrieveNextRetainerItemSlot = null!;
+
     [EzIPC("GC.%m")]
     [LuaFunction(description: "Enqueues initiation")]
     public readonly Action EnqueueInitiation = null!;
