@@ -1,4 +1,5 @@
 ﻿using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 
 namespace SomethingNeedDoing.Gui.Tabs;
 public class HelpTab(HelpLuaTab _luaTab, HelpCliTab _cliTab, HelpCommandsTab _commandsTab)
@@ -6,11 +7,11 @@ public class HelpTab(HelpLuaTab _luaTab, HelpCliTab _cliTab, HelpCommandsTab _co
     public void Draw()
     {
         ImGuiEx.EzTabBar("Tabs",
-            ("一般", HelpGeneralTab.DrawTab, null, false),
-            ("指令", _commandsTab.DrawTab, null, false),
+            ("General".Loc(), HelpGeneralTab.DrawTab, null, false),
+            ("Commands".Loc(), _commandsTab.DrawTab, null, false),
             ("Lua", _luaTab.DrawTab, null, false),
             ("Cli", _cliTab.DrawTab, null, false),
-            ("點擊", HelpClicksTab.DrawTab, null, false),
-            ("按鍵與傳送", HelpKeysTab.DrawTab, null, false));
+            ("Clicks".Loc(), HelpClicksTab.DrawTab, null, false),
+            ("Keys & Sends".Loc(), HelpKeysTab.DrawTab, null, false));
     }
 }

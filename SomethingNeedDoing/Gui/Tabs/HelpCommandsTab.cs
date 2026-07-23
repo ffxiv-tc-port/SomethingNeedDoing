@@ -1,6 +1,7 @@
 ﻿using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using System.Reflection;
 
@@ -38,7 +39,7 @@ public class HelpCommandsTab
     public void DrawTab()
     {
         using var child = ImRaii.Child(nameof(HelpCommandsTab));
-        ImGuiUtils.Section("指令", () =>
+        ImGuiUtils.Section("Commands".Loc(), () =>
         {
             foreach (var (name, info) in Commands.OrderBy(x => x.Key))
             {
@@ -52,7 +53,7 @@ public class HelpCommandsTab
             }
         });
 
-        ImGuiUtils.Section("修飾詞", () =>
+        ImGuiUtils.Section("Modifiers".Loc(), () =>
         {
             foreach (var (name, info) in Modifiers.OrderBy(x => x.Key))
             {

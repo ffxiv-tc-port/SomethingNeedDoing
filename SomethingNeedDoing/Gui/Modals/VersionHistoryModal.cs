@@ -1,5 +1,6 @@
 using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Managers;
 using System.Threading.Tasks;
 
@@ -66,11 +67,11 @@ public class VersionHistoryModal(GitMacroManager gitManager)
         if (child)
         {
             if (_isLoading)
-                ImGui.Text("正在載入提交歷史...");
+                ImGui.Text("Loading commit history...".Loc());
             else if (!string.IsNullOrEmpty(_errorMessage))
                 ImGuiEx.Text(EzColor.RedBright, _errorMessage);
             else if (_commits.Count == 0)
-                ImGui.Text("沒有可用的提交歷史。");
+                ImGui.Text("No commit history available.".Loc());
             else
             {
                 foreach (var commit in _commits)
@@ -88,26 +89,26 @@ public class VersionHistoryModal(GitMacroManager gitManager)
                     if (isCurrentVersion)
                     {
                         using var disabled = ImRaii.Disabled();
-                        ImGui.Button("目前版本", new Vector2(100, 0));
+                        ImGui.Button("Current Version".Loc(), new Vector2(100, 0));
                     }
                     else if (isLatestVersion)
                     {
-                        if (ImGui.Button("更新", new Vector2(100, 0)))
+                        if (ImGui.Button("Update".Loc(), new Vector2(100, 0)))
                             _ = UpdateToVersion(commit.Hash);
                     }
                     else
                     {
-                        if (ImGui.Button("還原", new Vector2(100, 0)))
+                        if (ImGui.Button("Restore".Loc(), new Vector2(100, 0)))
                             _ = UpdateToVersion(commit.Hash);
                     }
 
-                    ImGuiEx.Text(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled], $"作者: {commit.Author} - {commit.Date:g}");
+                    ImGuiEx.Text(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled], "Author: ?? - ??".Loc(commit.Author, commit.Date.ToString("g")));
                     ImGui.Separator();
                 }
             }
         }
 
-        ImGuiUtils.CenteredButtons(("關閉", Close));
+        ImGuiUtils.CenteredButtons(("Close".Loc(), Close));
     }
 
     private async Task UpdateToVersion(string commitHash)
@@ -124,7 +125,7 @@ public class VersionHistoryModal(GitMacroManager gitManager)
         }
         catch (Exception ex)
         {
-            _errorMessage = $"更新至版本 {commitHash} 失敗: {ex.Message}";
+            _errorMessage = "Failed to update to version ??: ??".Loc(commitHash, ex.Message);
         }
         finally
         {

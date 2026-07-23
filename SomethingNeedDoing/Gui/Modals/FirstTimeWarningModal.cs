@@ -1,6 +1,7 @@
 ﻿using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 
 namespace SomethingNeedDoing.Gui.Modals;
@@ -28,16 +29,16 @@ public static class FirstTimeWarningModal
         using var popup = ImRaii.PopupModal($"FirstTimeWarningPopup##{nameof(FirstTimeWarningModal)}", ref isOpen, ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoTitleBar);
         if (!popup) return;
 
-        ImGui.TextWrapped($"{P.Name} 已為配合 API 12 的框架變更而完全重寫。");
-        ImGui.BulletText("原生 (Native) 巨集運作方式應與之前大致相同。");
-        ImGui.BulletText("Lua 巨集將完全無法運作。腳本作者需要重新編寫新腳本。");
-        ImGui.BulletText("設定選單中提供了舊版巨集匯入工具。");
+        ImGui.TextWrapped("?? has been fully rewritten to support the framework changes from API 12.".Loc(P.Name));
+        ImGui.BulletText("Native macros should work much the same as before.".Loc());
+        ImGui.BulletText("Lua macros will not work at all. Scripts authors will need to write new scripts.".Loc());
+        ImGui.BulletText("There is a legacy macro importer located in the settings menu.".Loc());
 
         ImGui.Spacing();
-        ImGuiEx.TextCentered(ImGuiColors.DalamudGrey, $"此訊息僅會顯示一次，並將於 API13 發布後停止顯示。");
+        ImGuiEx.TextCentered(ImGuiColors.DalamudGrey, "This message will only be displayed once and will stop showing upon the release of API13.".Loc());
 
         var group = new ImGuiEx.EzButtonGroup() { IsCentered = true };
-        group.Add("確認並關閉", Close);
+        group.Add("Acknowledge and Close".Loc(), Close);
         group.Draw();
     }
 }

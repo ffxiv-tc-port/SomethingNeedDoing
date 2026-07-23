@@ -3,6 +3,7 @@ using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using SomethingNeedDoing.Managers;
 
@@ -35,7 +36,7 @@ public class StatusWindow : Window
                 _minimised = !_minimised;
                 _minimiseBtn!.Icon = _minimised ? FontAwesomeIcon.WindowMaximize : FontAwesomeIcon.Minus;
             },
-            ShowTooltip = () => { using var _ = ImRaii.Tooltip(); ImGuiEx.Text(_minimised ? "顯示所有巨集" : "僅顯示執行中的巨集"); },
+            ShowTooltip = () => { using var _ = ImRaii.Tooltip(); ImGuiEx.Text(_minimised ? "Show All Macros".Loc() : "Show Running Macros Only".Loc()); },
             AvailableClickthrough = true,
         };
         TitleBarButtons.Add(_minimiseBtn);
@@ -43,13 +44,13 @@ public class StatusWindow : Window
 
     public override void Draw()
     {
-        if (ImGui.Button(_showTriggerEvents ? "隱藏觸發事件" : "顯示觸發事件"))
+        if (ImGui.Button(_showTriggerEvents ? "Hide Trigger Events".Loc() : "Show Trigger Events".Loc()))
             _showTriggerEvents = !_showTriggerEvents;
 
         ImGui.SameLine();
         ImGui.TextColored(ImGuiColors.DalamudGrey, "|");
         ImGui.SameLine();
-        ImGui.TextColored(ImGuiColors.DalamudGrey, "巨集狀態");
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "Macro Status".Loc());
 
         ImGui.Separator();
 
@@ -85,7 +86,7 @@ public class StatusWindow : Window
         var isCollapsed = _parentCollapsedStates[parent.Id];
 
         var icon = isCollapsed ? FontAwesomeIcon.ChevronRight : FontAwesomeIcon.ChevronDown;
-        if (ImGuiUtils.IconButton(icon, isCollapsed ? "展開" : "摺疊"))
+        if (ImGuiUtils.IconButton(icon, isCollapsed ? "Expand".Loc() : "Collapse".Loc()))
             _parentCollapsedStates[parent.Id] = !isCollapsed;
 
         ImGui.SameLine();
@@ -94,7 +95,7 @@ public class StatusWindow : Window
         if (isCollapsed && children.Count > 0)
         {
             ImGui.SameLine();
-            ImGui.TextColored(ImGuiColors.DalamudGrey, $"（{children.Count} 個暫存）");
+            ImGui.TextColored(ImGuiColors.DalamudGrey, "(?? temp)".Loc(children.Count));
         }
 
         if (!isCollapsed)
@@ -118,17 +119,17 @@ public class StatusWindow : Window
     {
         if (macro.State == MacroState.Paused)
         {
-            if (ImGuiUtils.IconButton(FontAwesomeIcon.Play, "繼續"))
+            if (ImGuiUtils.IconButton(FontAwesomeIcon.Play, "Resume".Loc()))
                 _scheduler.ResumeMacro(macro.Id);
         }
         else
         {
-            if (ImGuiUtils.IconButton(FontAwesomeIcon.Pause, "暫停"))
+            if (ImGuiUtils.IconButton(FontAwesomeIcon.Pause, "Pause".Loc()))
                 _scheduler.PauseMacro(macro.Id);
         }
 
         ImGui.SameLine();
-        if (ImGuiUtils.IconButton(FontAwesomeIcon.Stop, "停止"))
+        if (ImGuiUtils.IconButton(FontAwesomeIcon.Stop, "Stop".Loc()))
             _scheduler.StopMacro(macro.Id);
     }
 
@@ -144,13 +145,13 @@ public class StatusWindow : Window
 
     private void DrawTriggerEventsSection()
     {
-        ImGuiEx.Text(ImGuiColors.DalamudOrange, "已註冊的觸發事件");
+        ImGuiEx.Text(ImGuiColors.DalamudOrange, "Registered Trigger Events".Loc());
         ImGui.Spacing();
 
         var triggerEvents = _triggerEventManager.EventHandlers;
         if (triggerEvents.Count == 0)
         {
-            ImGui.TextColored(ImGuiColors.DalamudGrey, "尚未註冊任何觸發事件");
+            ImGui.TextColored(ImGuiColors.DalamudGrey, "No trigger events registered".Loc());
             return;
         }
 

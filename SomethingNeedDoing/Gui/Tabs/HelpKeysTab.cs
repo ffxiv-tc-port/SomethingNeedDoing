@@ -1,6 +1,7 @@
 ﻿using Dalamud.Game.ClientState.Keys;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
+using ECommons.LanguageHelpers;
 
 namespace SomethingNeedDoing.Gui.Tabs;
 public static class HelpKeysTab
@@ -8,9 +9,9 @@ public static class HelpKeysTab
     public static void DrawTab()
     {
         using var child = ImRaii.Child(nameof(HelpKeysTab));
-        ImGuiUtils.Section("虛擬按鍵", () =>
+        ImGuiUtils.Section("Virtual Keys".Loc(), () =>
         {
-            ImGui.TextWrapped("使用 /send 指令來模擬鍵盤輸入。這對於與沒有專屬點擊指令的 UI 元素互動非常有用。");
+            ImGui.TextWrapped("Use the /send command to simulate keyboard input. This is useful for interacting with UI elements that don't have dedicated click commands.".Loc());
             ImGui.Spacing();
 
             // Get all valid virtual keys

@@ -1,5 +1,6 @@
 ﻿using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 
 namespace SomethingNeedDoing.Gui.Modals;
 public static class CreateFolderModal
@@ -36,12 +37,12 @@ public static class CreateFolderModal
 
         ImGuiEx.Icon(FontAwesomeHelper.IconFolder);
         ImGui.SameLine();
-        ImGui.Text("建立新資料夾");
+        ImGui.Text("Create New Folder".Loc());
         ImGui.Separator();
         ImGui.Spacing();
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("名稱:");
+        ImGui.Text("Name:".Loc());
 
         ImGui.SameLine();
         ImGuiUtils.SetFocusIfAppearing();
@@ -51,7 +52,7 @@ public static class CreateFolderModal
         ImGui.Spacing();
         ImGui.Spacing();
 
-        ImGuiUtils.CenteredButtons(("建立", () =>
+        ImGuiUtils.CenteredButtons(("Create".Loc(), () =>
         {
             var folderExists = false;
             foreach (var macro in C.Macros)
@@ -79,6 +80,6 @@ public static class CreateFolderModal
                 Close();
             }
         }
-        ), ("取消", Close));
+        ), ("Cancel".Loc(), Close));
     }
 }

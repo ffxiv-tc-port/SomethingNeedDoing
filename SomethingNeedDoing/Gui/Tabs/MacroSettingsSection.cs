@@ -2,6 +2,7 @@ using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using SomethingNeedDoing.Gui.Modals;
 using SomethingNeedDoing.Managers;
@@ -41,13 +42,13 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
             DrawDependencies(selectedMacro);
         }
         else
-            ImGui.TextColored(ImGuiColors.DalamudGrey, "選擇一個巨集以檢視及編輯其設定");
+            ImGui.TextColored(ImGuiColors.DalamudGrey, "Select a macro to view and edit its settings".Loc());
     }
 
     private void DrawMacroConfig(ConfigMacro selectedMacro)
     {
         if (selectedMacro.Metadata.Configs.Count == 0) return;
-        ImGuiUtils.Section("巨集設定", () =>
+        ImGuiUtils.Section("Macro Configuration".Loc(), () =>
         {
             foreach (var kvp in selectedMacro.Metadata.Configs)
             {
@@ -64,13 +65,13 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 ImGui.SameLine(ImGui.GetContentRegionAvail().X - 80);
                 using (ImRaii.Disabled(configValue.IsValueDefault()))
                 {
-                    if (ImGui.Button("重置", new Vector2(70, 0)))
+                    if (ImGui.Button("Reset".Loc(), new Vector2(70, 0)))
                     {
                         configValue.Value = configValue.DefaultValue;
                         C.Save();
                     }
                 }
-                ImGuiEx.Tooltip($"重置為預設值：{configValue.DefaultValue}");
+                ImGuiEx.Tooltip("Reset to default value: ??".Loc(configValue.DefaultValue));
                 ImGui.Spacing();
 
                 // Value editor based on type
@@ -95,7 +96,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                         if (configValue.MinValue != null || configValue.MaxValue != null)
                         {
                             ImGui.SameLine();
-                            ImGui.TextColored(ImGuiColors.DalamudGrey, $"範圍：{intMin} - {intMax}");
+                            ImGui.TextColored(ImGuiColors.DalamudGrey, "Range: ?? - ??".Loc(intMin, intMax));
                         }
                         break;
 
@@ -118,7 +119,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                         if (configValue.MinValue != null || configValue.MaxValue != null)
                         {
                             ImGui.SameLine();
-                            ImGui.TextColored(ImGuiColors.DalamudGrey, $"範圍：{floatMin:F2} - {floatMax:F2}");
+                            ImGui.TextColored(ImGuiColors.DalamudGrey, "Range: ?? - ??".Loc(floatMin.ToString("F2"), floatMax.ToString("F2")));
                         }
                         break;
 
@@ -147,12 +148,12 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                                 var regex = new System.Text.RegularExpressions.Regex(configValue.ValidationPattern);
                                 isValid = regex.IsMatch(stringValue);
                                 if (!isValid)
-                                    validationMessage = configValue.ValidationMessage ?? "數值不符合格式規則";
+                                    validationMessage = configValue.ValidationMessage ?? "Value does not match pattern".Loc();
                             }
                             catch (Exception ex)
                             {
                                 isValid = false;
-                                validationMessage = $"無效的驗證規則：{ex.Message}";
+                                validationMessage = "Invalid validation pattern: ??".Loc(ex.Message);
                             }
                         }
 
@@ -173,7 +174,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                             if (!isValid && !string.IsNullOrEmpty(validationMessage))
                                 ImGuiEx.Tooltip(validationMessage);
                             else if (isValid)
-                                ImGuiEx.Tooltip("數值符合驗證規則");
+                                ImGuiEx.Tooltip("Value matches validation pattern".Loc());
                         }
                         break;
                 }
@@ -185,7 +186,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 {
                     ImGui.SameLine();
                     ImGui.TextColored(ImGuiColors.DalamudRed, "*");
-                    ImGuiEx.Tooltip("此設定為必填項目");
+                    ImGuiEx.Tooltip("This configuration is required".Loc());
                 }
 
                 ImGui.Spacing();
@@ -197,10 +198,10 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
 
     private void DrawGeneralInfo(ConfigMacro selectedMacro)
     {
-        ImGuiUtils.Section("一般資訊", () =>
+        ImGuiUtils.Section("General Information".Loc(), () =>
         {
             ImGui.AlignTextToFramePadding();
-            ImGui.Text("作者：");
+            ImGui.Text("Author:".Loc());
             ImGui.SameLine(100);
 
             var author = selectedMacro.Metadata.Author ?? string.Empty;
@@ -212,7 +213,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
             }
 
             ImGui.AlignTextToFramePadding();
-            ImGui.Text("版本：");
+            ImGui.Text("Version:".Loc());
             ImGui.SameLine(100);
 
             var version = selectedMacro.Metadata.Version ?? string.Empty;
@@ -224,7 +225,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
             }
 
             ImGui.AlignTextToFramePadding();
-            ImGui.Text("描述：");
+            ImGui.Text("Description:".Loc());
 
             var description = selectedMacro.Metadata.Description ?? string.Empty;
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
@@ -234,32 +235,32 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 C.Save();
             }
 
-            if (ImGui.Button("將中繼資料寫入內容"))
+            if (ImGui.Button("Write Metadata to Content".Loc()))
             {
                 if (metadataParser.WriteMetadata(selectedMacro, OnContentUpdated))
                     FrameworkLogger.Debug($"Wrote metadata to macro {selectedMacro.Name}");
                 else
                     FrameworkLogger.Error($"Failed to write metadata to macro {selectedMacro.Name}");
             }
-            ImGuiEx.Tooltip("將目前的中繼資料（作者、版本、描述、相依項目、觸發條件）寫入巨集內容。若已存在中繼資料，將會被更新。");
+            ImGuiEx.Tooltip("Writes the current metadata (author, version, description, dependencies, triggers) to the macro content. If metadata already exists, it will be updated.".Loc());
 
             ImGui.SameLine();
 
-            if (ImGui.Button("從內容讀取中繼資料"))
+            if (ImGui.Button("Read Metadata from Content".Loc()))
             {
                 selectedMacro.Metadata = metadataParser.ParseMetadata(selectedMacro.Content);
                 C.Save();
             }
-            ImGuiEx.Tooltip("從巨集內容讀取中繼資料（作者、版本、描述、相依項目、觸發條件）並更新設定。");
+            ImGuiEx.Tooltip("Reads metadata (author, version, description, dependencies, triggers) from the macro content and updates the settings.".Loc());
         });
     }
 
     private void DrawGitInfo(ConfigMacro selectedMacro)
     {
-        ImGuiUtils.Section("Git 資訊", () =>
+        ImGuiUtils.Section("Git Information".Loc(), () =>
         {
             ImGui.AlignTextToFramePadding();
-            ImGui.Text("GitHub 網址：");
+            ImGui.Text("GitHub URL:".Loc());
             ImGui.SameLine(100);
 
             var repoUrl = selectedMacro.GitInfo.RepositoryUrl;
@@ -269,20 +270,20 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 selectedMacro.GitInfo.RepositoryUrl = repoUrl;
                 C.Save();
             }
-            ImGuiEx.Tooltip("輸入 GitHub 網址（例如：https://github.com/owner/repo/blob/branch/path）");
+            ImGuiEx.Tooltip("Enter a GitHub URL (e.g., https://github.com/owner/repo/blob/branch/path)".Loc());
 
             if (selectedMacro.IsGitMacro)
             {
                 ImGui.AlignTextToFramePadding();
                 var autoUpdate = selectedMacro.GitInfo.AutoUpdate;
-                if (ImGui.Checkbox("自動更新", ref autoUpdate))
+                if (ImGui.Checkbox("Auto Update".Loc(), ref autoUpdate))
                 {
                     selectedMacro.GitInfo.AutoUpdate = autoUpdate;
                     C.Save();
                 }
 
                 var group = new ImGuiEx.EzButtonGroup();
-                group.AddIconWithText(FontAwesomeIcon.Download, "匯入", () =>
+                group.AddIconWithText(FontAwesomeIcon.Download, "Import".Loc(), () =>
                 {
                     if (!string.IsNullOrWhiteSpace(repoUrl))
                     {
@@ -299,9 +300,9 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                         });
                     }
                 });
-                group.AddIconWithText(FontAwesomeIcon.History, "版本歷史紀錄", () => versionHistoryModal.Open(selectedMacro));
-                group.AddIconWithText(FontAwesomeIcon.Sync, "重置 Git 資訊",
-                    () => { selectedMacro.GitInfo = new GitInfo(); C.Save(); }, "清除所有 Git 資訊，並將此巨集還原為標準本機巨集。",
+                group.AddIconWithText(FontAwesomeIcon.History, "Version History".Loc(), () => versionHistoryModal.Open(selectedMacro));
+                group.AddIconWithText(FontAwesomeIcon.Sync, "Reset Git Info".Loc(),
+                    () => { selectedMacro.GitInfo = new GitInfo(); C.Save(); }, "Wipes all git information and reverts this macro back to a standard local macro.".Loc(),
                     new() { ButtonColor = EzColor.Red });
                 group.Draw();
             }
@@ -310,10 +311,10 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
 
     private void DrawCraftLoop(ConfigMacro selectedMacro)
     {
-        ImGuiUtils.Section("CraftLoop 設定", () =>
+        ImGuiUtils.Section("CraftLoop Settings".Loc(), () =>
         {
             var craftingLoop = selectedMacro.Metadata.CraftingLoop;
-            if (ImGui.Checkbox("啟用製作循環", ref craftingLoop))
+            if (ImGui.Checkbox("Enable Crafting Loop".Loc(), ref craftingLoop))
             {
                 selectedMacro.Metadata.CraftingLoop = craftingLoop;
                 C.Save();
@@ -325,7 +326,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
 
                 var loopCount = selectedMacro.Metadata.CraftLoopCount;
                 ImGui.SetNextItemWidth(100);
-                if (ImGui.InputInt("循環次數", ref loopCount))
+                if (ImGui.InputInt("Loop Count".Loc(), ref loopCount))
                 {
                     if (loopCount < -1)
                         loopCount = -1;
@@ -335,7 +336,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 }
 
                 ImGui.SameLine();
-                ImGui.TextColored(ImGuiColors.DalamudGrey, "（-1 = 無限）");
+                ImGui.TextColored(ImGuiColors.DalamudGrey, "(-1 = infinite)".Loc());
 
                 ImGui.Unindent(20);
             }
@@ -344,7 +345,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
 
     private void DrawTriggers(ConfigMacro selectedMacro)
     {
-        ImGuiUtils.Section("觸發事件", () =>
+        ImGuiUtils.Section("Trigger Events".Loc(), () =>
         {
             var events = new List<TriggerEvent>(selectedMacro.Metadata.TriggerEvents);
             if (ImGuiUtils.EnumCheckboxes(ref events, [TriggerEvent.None]))
@@ -357,7 +358,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 ImGui.Separator();
                 ImGui.Spacing();
 
-                ImGui.Text("Addon 事件設定");
+                ImGui.Text("Addon Event Configuration".Loc());
                 ImGui.Spacing();
 
                 var addonConfig = selectedMacro.Metadata.AddonEventConfig ?? new AddonEventConfig();
@@ -365,7 +366,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 var eventType = addonConfig.EventType;
 
                 ImGui.AlignTextToFramePadding();
-                ImGui.Text("Addon 名稱：");
+                ImGui.Text("Addon Name:".Loc());
                 ImGui.SameLine(100);
 
                 ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
@@ -377,7 +378,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 }
 
                 ImGui.AlignTextToFramePadding();
-                ImGui.Text("事件類型：");
+                ImGui.Text("Event Type:".Loc());
                 ImGui.SameLine(100);
 
                 ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
@@ -388,7 +389,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                     C.Save();
                 }
 
-                if (ImGui.Button("清除 Addon 事件設定"))
+                if (ImGui.Button("Clear Addon Event Config".Loc()))
                 {
                     selectedMacro.Metadata.AddonEventConfig = null;
                     C.Save();
@@ -399,7 +400,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
 
     private void DrawPluginDependencies(ConfigMacro selectedMacro)
     {
-        ImGuiUtils.Section("外掛相依項目", () =>
+        ImGuiUtils.Section("Plugin Dependencies".Loc(), () =>
         {
             var installedPlugins = Svc.PluginInterface.InstalledPlugins
                 .Where(p => p.IsLoaded)
@@ -422,7 +423,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
             ImGui.Spacing();
 
             if (selectedMacro.Metadata.PluginDependecies.Length == 0)
-                ImGui.TextColored(ImGuiColors.DalamudGrey, "尚未設定任何外掛相依項目");
+                ImGui.TextColored(ImGuiColors.DalamudGrey, "No plugin dependencies configured".Loc());
             else
             {
                 foreach (var plugin in selectedMacro.Metadata.PluginDependecies)
@@ -433,7 +434,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                     ImGui.Text(plugin);
                     ImGui.SameLine(ImGui.GetContentRegionAvail().X - 30);
 
-                    if (ImGuiUtils.IconButton(FontAwesomeIcon.Trash, "移除相依項目"))
+                    if (ImGuiUtils.IconButton(FontAwesomeIcon.Trash, "Remove dependency".Loc()))
                     {
                         var newDeps = selectedMacro.Metadata.PluginDependecies.ToList();
                         newDeps.Remove(plugin);
@@ -447,7 +448,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
 
     private void DrawPluginConflicts(ConfigMacro selectedMacro)
     {
-        ImGuiUtils.Section("外掛衝突", () =>
+        ImGuiUtils.Section("Plugin Conflicts".Loc(), () =>
         {
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             if (ImGuiEx.Combo("##DisableablePluginSelector", ref _pluginToDisable, _disableablePluginNames))
@@ -464,7 +465,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
             ImGui.Spacing();
 
             if (selectedMacro.Metadata.PluginsToDisable.Length == 0)
-                ImGui.TextColored(ImGuiColors.DalamudGrey, "尚未設定任何需停用的外掛");
+                ImGui.TextColored(ImGuiColors.DalamudGrey, "No plugins configured to disable".Loc());
             else
             {
                 foreach (var plugin in selectedMacro.Metadata.PluginsToDisable)
@@ -475,7 +476,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                     ImGui.Text(plugin);
                     ImGui.SameLine(ImGui.GetContentRegionAvail().X - 30);
 
-                    if (ImGuiUtils.IconButton(FontAwesomeIcon.Trash, "移除外掛"))
+                    if (ImGuiUtils.IconButton(FontAwesomeIcon.Trash, "Remove plugin".Loc()))
                     {
                         var newDeps = selectedMacro.Metadata.PluginsToDisable.ToList();
                         newDeps.Remove(plugin);
@@ -489,10 +490,10 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
 
     private void DrawDependencies(ConfigMacro selectedMacro)
     {
-        ImGuiUtils.Section("巨集相依項目", () =>
+        ImGuiUtils.Section("Macro Dependencies".Loc(), () =>
         {
             if (selectedMacro.Metadata.Dependencies.Count == 0)
-                ImGui.TextColored(ImGuiColors.DalamudGrey, "尚未設定任何巨集相依項目");
+                ImGui.TextColored(ImGuiColors.DalamudGrey, "No macro dependencies configured".Loc());
             else
             {
                 for (var i = 0; i < selectedMacro.Metadata.Dependencies.Count; i++)
@@ -511,7 +512,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                     ImGuiEx.IconWithText(icon, displayName);
 
                     ImGui.SameLine(ImGui.GetContentRegionAvail().X - 30);
-                    if (ImGuiUtils.IconButton(FontAwesomeIcon.Trash, "移除相依項目"))
+                    if (ImGuiUtils.IconButton(FontAwesomeIcon.Trash, "Remove dependency".Loc()))
                     {
                         selectedMacro.Metadata.Dependencies.RemoveAt(i--);
                         C.Save();
@@ -523,7 +524,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
             ImGui.Separator();
             ImGui.Spacing();
 
-            ImGui.Text("新增相依項目");
+            ImGui.Text("Add New Dependency".Loc());
             ImGui.Spacing();
 
             ImGuiEx.EnumRadio(ref _dependencyType, true);
@@ -532,7 +533,7 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
 
             if (_dependencyType == DependencyType.Local)
             {
-                ImGui.Text("本機相依項目類型：");
+                ImGui.Text("Local Dependency Type:".Loc());
                 ImGui.Spacing();
 
                 ImGuiEx.EnumRadio(ref _localDependencyType, true);
@@ -555,9 +556,9 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
                 {
                     ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
                     ImGui.InputText("##LocalFilePath", ref _localFilePath, 1000);
-                    ImGuiEx.Tooltip("輸入本機檔案的完整路徑");
+                    ImGuiEx.Tooltip("Enter the full path to a local file".Loc());
 
-                    if (ImGui.Button("新增檔案相依項目"))
+                    if (ImGui.Button("Add File Dependency".Loc()))
                     {
                         if (!string.IsNullOrWhiteSpace(_localFilePath))
                         {
@@ -572,9 +573,9 @@ public class MacroSettingsSection(IMacroScheduler scheduler, DependencyFactory d
             {
                 ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
                 ImGui.InputText("##GitUrl", ref _gitUrl, 1000);
-                ImGuiEx.Tooltip("輸入 GitHub 網址（例如：https://github.com/owner/repo 或 https://github.com/owner/repo/blob/branch/path）");
+                ImGuiEx.Tooltip("Enter a GitHub URL (e.g., https://github.com/owner/repo or https://github.com/owner/repo/blob/branch/path)".Loc());
 
-                if (ImGui.Button("新增相依項目"))
+                if (ImGui.Button("Add Dependency".Loc()))
                 {
                     if (!string.IsNullOrWhiteSpace(_gitUrl))
                     {

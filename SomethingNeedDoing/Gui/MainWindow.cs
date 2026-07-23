@@ -2,6 +2,7 @@
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using SomethingNeedDoing.Gui.Modals;
 using SomethingNeedDoing.Gui.Tabs;
@@ -81,15 +82,15 @@ public class MainWindow : Window
         _versionHistoryModal.Draw();
 
         using var _ = ImRaii.TabBar("Tabs");
-        using (var tab = ImRaii.TabItem("巨集庫"))
+        using (var tab = ImRaii.TabItem("MacrosLibrary".Loc()))
             if (tab)
                 _macrosTab.Draw();
 
-        using (var tab = ImRaii.TabItem("說明"))
+        using (var tab = ImRaii.TabItem("Help".Loc()))
             if (tab)
                 _helpTab.Draw();
 
-        using (var tab = ImRaii.TabItem("設定"))
+        using (var tab = ImRaii.TabItem("Settings".Loc()))
             if (tab)
                 SettingsTab.DrawTab();
     }
