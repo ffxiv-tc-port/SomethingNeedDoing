@@ -12,7 +12,7 @@
     沿用 AutoRetainer 自己的「背包快滿」門檻，跟它內建功能一致）。
 ]]
 
-local INTERVAL = 0.2  -- 每次觸發之間的間隔秒數，越小越快但漏接風險越高，不建議壓太低
+local INTERVAL = 0.1  -- 每次觸發之間的間隔秒數，越小越快但漏接風險越高，不建議壓太低
 local MAX_PASSES = 3  -- 最多掃幾輪，每輪結束後停頓一下再檢查是否還有漏接的
 
 if not IPC.IsInstalled("AutoRetainer") then
