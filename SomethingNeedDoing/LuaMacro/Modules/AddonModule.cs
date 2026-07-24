@@ -20,7 +20,7 @@ public unsafe class AddonModule : LuaModuleBase
         _debugHook?.Dispose();
         _debugHook = null;
 
-        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(addonName);
+        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(addonName).Address;
         if (addon == null)
         {
             Svc.Log.Warning($"[DebugHook] Addon {addonName} not found");
@@ -67,7 +67,7 @@ public unsafe class AddonModule : LuaModuleBase
     [LuaFunction(description: "If the ContextMenu addon is open, selects the entry whose text matches the given label. Returns true if selected.")]
     public bool SelectContextMenuEntry(string label)
     {
-        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName("ContextMenu");
+        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName("ContextMenu").Address;
         if (addon == null || !IsAddonReady(addon))
             return false;
 
@@ -83,7 +83,7 @@ public unsafe class AddonModule : LuaModuleBase
     [LuaFunction(description: "If the ContextIconMenu addon is open, selects entry 'index' via the same callback convention as ContextMenu (unverified for multi-entry cases; only tested with a single entry).")]
     public bool SelectContextIconMenuEntry(int index)
     {
-        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName("ContextIconMenu");
+        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName("ContextIconMenu").Address;
         if (addon == null || !IsAddonReady(addon))
             return false;
 
@@ -94,7 +94,7 @@ public unsafe class AddonModule : LuaModuleBase
     [LuaFunction(description: "If the ContextIconMenu addon is open, finds the entry whose GetValueTexts() contains the given substring and selects it. Returns true if found and selected.")]
     public bool SelectContextIconMenuEntryByText(string containsText)
     {
-        var addonPtr = (AtkUnitBase*)Svc.GameGui.GetAddonByName("ContextIconMenu");
+        var addonPtr = (AtkUnitBase*)Svc.GameGui.GetAddonByName("ContextIconMenu").Address;
         if (addonPtr == null || !IsAddonReady(addonPtr))
             return false;
 

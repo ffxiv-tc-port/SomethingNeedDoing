@@ -8,7 +8,7 @@ using SomethingNeedDoing.Core.Interfaces;
 namespace SomethingNeedDoing.LuaMacro.Wrappers;
 public unsafe class AddonWrapper(string name) : IWrapper
 {
-    private AtkUnitBase* Addon => (AtkUnitBase*)Svc.GameGui.GetAddonByName(name);
+    private AtkUnitBase* Addon => (AtkUnitBase*)Svc.GameGui.GetAddonByName(name).Address;
     private Pointer<AtkResNode>[] NodeList => Addon->UldManager.Nodes.ToArray();
     private AtkValue[] AtkValuesList => Addon->AtkValuesSpan.ToArray();
 
