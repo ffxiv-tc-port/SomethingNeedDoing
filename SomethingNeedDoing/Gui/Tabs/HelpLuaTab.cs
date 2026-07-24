@@ -11,6 +11,14 @@ using System.Reflection;
 namespace SomethingNeedDoing.Gui.Tabs;
 public class HelpLuaTab(LuaDocumentation luaDocs)
 {
+    // Lua module types are fixed at assembly-load time, so scan for them once instead of
+    // running a full Assembly.GetTypes() reflection scan on every non-method doc entry drawn,
+    // every frame the tab is open.
+    private static readonly Dictionary<string, Type> ModuleTypesByName = typeof(HelpLuaTab).Assembly.GetTypes()
+        .Where(t => typeof(LuaModuleBase).IsAssignableFrom(t))
+        .GroupBy(t => t.Name)
+        .ToDictionary(g => g.Key, g => g.First());
+
     public void DrawTab()
     {
         using var child = ImRaii.Child(nameof(HelpLuaTab));
@@ -65,7 +73,7 @@ public class HelpLuaTab(LuaDocumentation luaDocs)
 
         if (!isMethod && function.Parameters.Count == 0)
         {
-            if (typeof(HelpLuaTab).Assembly.GetTypes().FirstOrDefault(t => t.Name == function.ModuleName.Split('.').Last() + "Module" && typeof(LuaModuleBase).IsAssignableFrom(t)) is { } modType)
+            if (ModuleTypesByName.TryGetValue(function.ModuleName.Split('.').Last() + "Module", out var modType))
             {
                 if (modType.GetProperty(function.FunctionName, BindingFlags.Public | BindingFlags.Instance) is { CanWrite: true })
                 {
