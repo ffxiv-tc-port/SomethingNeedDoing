@@ -19,6 +19,14 @@ public class HelpLuaTab(LuaDocumentation luaDocs)
         .GroupBy(t => t.Name)
         .ToDictionary(g => g.Key, g => g.First());
 
+    // Same rationale as ModuleTypesByName: wrapper types are fixed at assembly-load time, and
+    // DrawWrapperProperties recurses into nested wrapper properties, so an uncached scan here
+    // could run several times per frame instead of just once per non-method doc entry.
+    private static readonly Dictionary<string, Type> WrapperTypesByName = typeof(HelpLuaTab).Assembly.GetTypes()
+        .Where(t => typeof(IWrapper).IsAssignableFrom(t))
+        .GroupBy(t => t.Name)
+        .ToDictionary(g => g.Key, g => g.First());
+
     public void DrawTab()
     {
         using var child = ImRaii.Child(nameof(HelpLuaTab));
@@ -170,10 +178,7 @@ public class HelpLuaTab(LuaDocumentation luaDocs)
 
     private void DrawWrapperProperties(string wrapperTypeName, string id, string parentChain = "")
     {
-        var wrapperType = typeof(HelpLuaTab).Assembly.GetTypes()
-            .FirstOrDefault(t => t.Name == wrapperTypeName && typeof(IWrapper).IsAssignableFrom(t));
-
-        if (wrapperType == null || !typeof(IWrapper).IsAssignableFrom(wrapperType))
+        if (!WrapperTypesByName.TryGetValue(wrapperTypeName, out var wrapperType))
             return;
 
         var wrapperProperties = wrapperType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
