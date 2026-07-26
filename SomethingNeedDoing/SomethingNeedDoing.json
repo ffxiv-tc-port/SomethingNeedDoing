@@ -5,8 +5,8 @@
   "Description": "現在不只能用於生產，功能更多！",
   "ApplicableVersion": "any",
   "DalamudApiLevel": 12,
-  "RepoUrl": "https://github.com/Lother/SomethingNeedDoing",
-  "IconUrl": "https://raw.githubusercontent.com/Lother/DalamudPluginsTC/main/icons/SomethingNeedDoing.png",
+  "RepoUrl": "https://github.com/ffxiv-tc-port/SomethingNeedDoing",
+  "IconUrl": "https://raw.githubusercontent.com/ffxiv-tc-port/DalamudPluginsTC/main/icons/SomethingNeedDoing.png",
   "Tags": [
     "crafting", "automation", "macros", "lua", "scripting"
   ]
