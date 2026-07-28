@@ -98,10 +98,9 @@ public static class SettingsTab
 
                 var craftLoopMaxWait = C.CraftLoopMaxWait;
                 if (ImGui.SliderInt("CraftLoop maxwait value".Loc(), ref craftLoopMaxWait, 1, 10))
-                {
                     C.CraftLoopMaxWait = craftLoopMaxWait;
+                if (ImGui.IsItemDeactivatedAfterEdit())
                     C.Save();
-                }
 
                 var craftLoopEcho = C.CraftLoopEcho;
                 if (ImGui.Checkbox("CraftLoop echo".Loc(), ref craftLoopEcho))
@@ -124,10 +123,9 @@ public static class SettingsTab
 
             var maxTimeoutRetries = C.MaxTimeoutRetries;
             if (ImGui.SliderInt("Max Timeout Retries".Loc(), ref maxTimeoutRetries, 0, 10))
-            {
                 C.MaxTimeoutRetries = maxTimeoutRetries;
+            if (ImGui.IsItemDeactivatedAfterEdit())
                 C.Save();
-            }
 
             var noisyErrors = C.NoisyErrors;
             if (ImGui.Checkbox("Noisy Errors".Loc(), ref noisyErrors))
@@ -140,24 +138,21 @@ public static class SettingsTab
             {
                 var beepFrequency = C.BeepFrequency;
                 if (ImGui.SliderInt("Beep Frequency".Loc(), ref beepFrequency, 0, 1000))
-                {
                     C.BeepFrequency = beepFrequency;
+                if (ImGui.IsItemDeactivatedAfterEdit())
                     C.Save();
-                }
 
                 var beepDuration = C.BeepDuration;
                 if (ImGui.SliderInt("Beep Duration".Loc(), ref beepDuration, 0, 1000))
-                {
                     C.BeepDuration = beepDuration;
+                if (ImGui.IsItemDeactivatedAfterEdit())
                     C.Save();
-                }
 
                 var beepCount = C.BeepCount;
                 if (ImGui.SliderInt("Beep Count".Loc(), ref beepCount, 0, 10))
-                {
                     C.BeepCount = beepCount;
+                if (ImGui.IsItemDeactivatedAfterEdit())
                     C.Save();
-                }
             }
         });
 
