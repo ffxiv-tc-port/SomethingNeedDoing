@@ -14,14 +14,16 @@ public static class SettingsTab
         ImGuiUtils.Section("General Settings".Loc(), () =>
         {
             var chatChannel = C.ChatType;
-            if (ImGuiEx.EnumCombo("ChatType", ref chatChannel))
+            // "###ChatType" keeps the ImGui id (and ECommons' EnumComboSearch dictionary
+            // key) language-independent; only the visible label is translated.
+            if (ImGuiEx.EnumCombo("ChatType".Loc() + "###ChatType", ref chatChannel))
             {
                 C.ChatType = chatChannel;
                 C.Save();
             }
 
             var errorChannel = C.ErrorChatType;
-            if (ImGuiEx.EnumCombo("ErrorChatType", ref errorChannel))
+            if (ImGuiEx.EnumCombo("ErrorChatType".Loc() + "###ErrorChatType", ref errorChannel))
             {
                 C.ErrorChatType = errorChannel;
                 C.Save();

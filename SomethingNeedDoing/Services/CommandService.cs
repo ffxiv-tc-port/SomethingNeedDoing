@@ -1,5 +1,6 @@
 using Dalamud.Interface.Windowing;
 using ECommons;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using SomethingNeedDoing.Gui;
 
@@ -68,7 +69,7 @@ public class CommandService
 
     public void RegisterCommands()
     {
-        EzCmd.Add(MainCommand, OnChatCommand, "Open a window to edit various settings.", displayOrder: int.MinValue);
+        EzCmd.Add(MainCommand, OnChatCommand, "Open a window to edit various settings.".Loc(), displayOrder: int.MinValue);
         Aliases.ToList().ForEach(a => EzCmd.Add(a, OnChatCommand, $"{MainCommand} Alias"));
     }
 

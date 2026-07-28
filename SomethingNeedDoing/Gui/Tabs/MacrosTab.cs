@@ -348,7 +348,8 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
                 var isNative = macro.Type == MacroType.Native;
                 var isLua = macro.Type == MacroType.Lua;
 
-                if (ImGui.MenuItem("Native", isNative))
+                // "Lua" below is a proper noun and stays untranslated.
+                if (ImGui.MenuItem("Native".Loc() + "###Native", isNative))
                 {
                     configMacro.Type = MacroType.Native;
                     C.Save();
