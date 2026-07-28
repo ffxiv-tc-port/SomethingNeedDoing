@@ -97,7 +97,7 @@ public unsafe class InventoryModule : LuaModuleBase
     public unsafe class InventoryContainerWrapper(InventoryType container) : IWrapper
     {
         private readonly InventoryContainer* _container = InventoryManager.Instance()->GetInventoryContainer(container);
-        [LuaDocs] public uint Count => _container->Size;
+        [LuaDocs] public int Count => _container->Size;
 
         [LuaDocs]
         public int FreeSlots
@@ -181,9 +181,9 @@ public unsafe class InventoryModule : LuaModuleBase
         public void OpenContextMenu()
         {
             var addonName = $"InventoryGrid{(int)Container}E";
-            var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(addonName);
+            var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(addonName).Address;
             var addonId = addon != null ? addon->Id : (uint)0;
-            AgentInventoryContext.Instance()->OpenForItemSlot(Container, Slot, addonId);
+            AgentInventoryContext.Instance()->OpenForItemSlot(Container, Slot, 0, addonId);
         }
 
         [LuaDocs]
