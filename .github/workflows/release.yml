@@ -24,7 +24,12 @@ jobs:
       - name: Download Dalamud (pinned TC-compatible build)
         run: |
           wget https://github.com/ffxiv-tc-port/DalamudPluginsTC/releases/download/dalamud-pin-v13.0.0.6/dalamud-api13-net9.zip -O ${{ env.DALAMUD_HOME }}.zip
-          unzip ${{ env.DALAMUD_HOME }}.zip -d ${{ env.DALAMUD_HOME }}
+          # unzip exits 1 for warnings-only extractions (this zip triggers that),
+          # which is why || true was here originally - but that also swallowed
+          # real failures. Tolerate the warning exit, then assert the one thing
+          # that actually matters: Dalamud.dll exists.
+          unzip ${{ env.DALAMUD_HOME }}.zip -d ${{ env.DALAMUD_HOME }} || [ $? -eq 1 ]
+          test -f ${{ env.DALAMUD_HOME }}/Dalamud.dll
 
       - name: Restore Project
         run: dotnet restore
