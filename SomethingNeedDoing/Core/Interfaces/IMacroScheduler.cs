@@ -130,4 +130,11 @@ public interface IMacroScheduler
     /// </summary>
     /// <param name="macroId">The ID of the macro to invalidate cache for.</param>
     void InvalidateFunctionCache(string macroId);
+
+    /// <summary>
+    /// Stops a macro if running and unregisters all of its trigger subscriptions.
+    /// </summary>
+    /// <remarks>Call before removing from config</remarks>
+    /// <param name="macro">The macro being deleted.</param>
+    void UnregisterDeletedMacro(IMacro macro);
 }
