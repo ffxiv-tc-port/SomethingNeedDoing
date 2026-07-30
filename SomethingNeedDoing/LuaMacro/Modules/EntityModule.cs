@@ -16,4 +16,12 @@ public unsafe class EntityModule : LuaModuleBase
     [LuaFunction] public EntityWrapper? GetPartyMember(int index) => Svc.Party.GetPartyMemberAddress(index) is { } member ? new(member) : null;
     [LuaFunction] public EntityWrapper? GetAllianceMember(int index) => Svc.Party.GetAllianceMemberAddress(index) is { } member ? new(member) : null;
     [LuaFunction] public EntityWrapper? GetEntityByName(string name) => Svc.Objects.FirstOrDefault(o => o.Name.TextValue.Equals(name, StringComparison.InvariantCultureIgnoreCase)) is { } obj ? new(obj) : null;
+
+    [LuaFunction(description: "Gets all game objects within the given range (yalms) of the player, ordered by distance (includes the player itself). Returns an empty list when there is no local player. One call replaces scanning Entity[0..599] index by index from Lua.")]
+    public List<EntityWrapper> GetNearbyObjects(float range) => Svc.ClientState.LocalPlayer == null
+        ? []
+        : [.. Svc.Objects
+            .Where(o => ECommons.GameHelpers.Player.DistanceTo(o) <= range)
+            .OrderBy(ECommons.GameHelpers.Player.DistanceTo)
+            .Select(o => new EntityWrapper(o))];
 }
