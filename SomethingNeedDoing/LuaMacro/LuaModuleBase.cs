@@ -29,10 +29,17 @@ public abstract class LuaModuleBase : ILuaModule
         RegisterMetaTable(lua, modulePath);
 
         // Register all methods marked with LuaFunction attribute
+        var registeredNames = new HashSet<string>();
         foreach (var method in GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
         {
             if (method.GetCustomAttribute<LuaFunctionAttribute>() is not { } attr) continue;
             var name = attr.Name ?? method.Name;
+
+            // Lua 註冊表不支援同名 overload,後註冊者會蓋掉先註冊者;
+            // 撞名時記警告,提醒用 [LuaFunction(name: ...)] 給其中一個獨立名稱
+            if (!registeredNames.Add(name))
+                FrameworkLogger.Warning($"Duplicate Lua function name {modulePath}.{name}: a previously registered overload is being overwritten. Give one of the overloads a distinct [LuaFunction] name.");
+
             lua[$"{modulePath}.{name}"] = CreateDelegate(method);
         }
 

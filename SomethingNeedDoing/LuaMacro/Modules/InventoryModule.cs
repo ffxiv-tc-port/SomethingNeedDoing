@@ -13,7 +13,13 @@ public unsafe class InventoryModule : LuaModuleBase
     protected override object? MetaIndex(LuaTable table, object key) => GetInventoryContainer(Enum.Parse<InventoryType>(key.ToString() ?? string.Empty));
 
     [LuaFunction] public InventoryContainerWrapper GetInventoryContainer(InventoryType container) => new(container);
-    [LuaFunction] public InventoryItemWrapper GetInventoryItem(InventoryType container, int slot) => new(container, slot);
+
+    // Lua 端不支援同名 overload:LuaModuleBase.Register 逐一以「模組.函式名」為 key 註冊,
+    // 後註冊者會蓋掉先註冊者。這個 (container, slot) 版本過去被下面的 (itemId) 版本遮蔽,
+    // 從 Lua 實際上呼叫不到;改用獨立的 Lua 名稱 GetInventoryItemInSlot 讓兩個都可用。
+    // 沿用 GetInventoryItem 名稱的是 (itemId) 版本,與既有腳本的實際行為一致。
+    [LuaFunction(name: "GetInventoryItemInSlot", description: "Gets the item in the given slot of the given container.")]
+    public InventoryItemWrapper GetInventoryItem(InventoryType container, int slot) => new(container, slot);
 
     [LuaFunction]
     [Changelog("12.9")]
