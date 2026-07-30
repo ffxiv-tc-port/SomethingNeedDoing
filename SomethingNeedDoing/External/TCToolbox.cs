@@ -87,8 +87,20 @@ public class TCToolbox : IPC
     public readonly Func<string> GetLastSummary = null!;
 
     [EzIPC("Gardening.%m")]
-    [LuaFunction(description: "Game object ids of nearby garden patches, ordered by distance. Empty when not standing in a garden you own.")]
+    [LuaFunction(description: "Game object ids of nearby garden patches and gardening flower pots, ordered by distance. Empty when not standing in housing you have permission for.")]
     public readonly Func<List<ulong>> GetNearbyPatches = null!;
+
+    [EzIPC("Gardening.%m")]
+    [LuaFunction(
+        description: "Like GetNearbyPatches but filtered by kind: 'plot' for outdoor garden patches, 'pot' for indoor gardening flower pots; any other value returns everything.",
+        parameterDescriptions: ["kind"])]
+    public readonly Func<string, List<ulong>> GetNearbyPatchesOfKind = null!;
+
+    [EzIPC("Gardening.%m")]
+    [LuaFunction(
+        description: "Kind of the given object: 'plot' (outdoor garden patch), 'pot' (indoor gardening flower pot) or 'unknown' (not a plantable container).",
+        parameterDescriptions: ["gameObjectId"])]
+    public readonly Func<ulong, string> GetPatchKind = null!;
 
     [EzIPC("Gardening.%m")]
     [LuaFunction(
