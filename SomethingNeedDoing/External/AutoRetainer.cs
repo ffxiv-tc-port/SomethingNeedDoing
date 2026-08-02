@@ -101,8 +101,12 @@ public class AutoRetainer : IPC
     public readonly Func<ulong, long?> GetClosestRetainerVentureSecondsRemaining = null!;
 
     [EzIPC("PluginState.%m")]
-    [LuaFunction(description: "Retrieves one item slot from the currently open retainer's inventory into the player's own bags, without waiting to confirm it landed. Returns false once nothing is left or the player's inventory is nearly full; loop this with a short yield between calls.")]
+    [LuaFunction(description: "Retrieves one item slot from the currently open retainer's inventory into the player's own bags, without waiting to confirm it landed. Slots that already have a retrieve command in flight are skipped, so looping this fires roughly one command per slot. Returns false once nothing is left, the player's inventory is nearly full, or every remaining slot is already in flight; loop this with a short yield between calls, then let the inventory settle and start a new round.")]
     public readonly Func<bool> RetrieveNextRetainerItemSlot = null!;
+
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(description: "Forgets which retainer slots RetrieveNextRetainerItemSlot already fired at, so the next call considers every occupied slot again. Call at the start of each retrieval sweep. Older AutoRetainer builds do not provide this method, so wrap the call in pcall.")]
+    public readonly Action ResetRetainerRetrieveTracking = null!;
 
     [EzIPC("GC.%m")]
     [LuaFunction(description: "Enqueues initiation")]
