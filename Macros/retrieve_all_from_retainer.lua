@@ -139,9 +139,12 @@ for pass = 1, MAX_PASSES do
     if movedThisPass < 0 then movedThisPass = 0 end
     totalRetrieved = totalRetrieved + movedThisPass
 
+    -- exhausted = IPC 主動說「沒有更多可送的了」。去重正常運作時每一輪都應該是 true；
+    -- 若看到 false（送滿 budget 才停），代表 IPC 端還一直找得到沒送過的格子，去重可能沒生效。
     Dalamud.Log(string.format(
-        "第 %d 輪完成：送出 %d 個指令，雇員格數 %d → %d（本輪取回 %d 格，等待落地 %.2f 秒，累計指令 %d 次）。",
-        pass, sentThisPass, before, after, movedThisPass, waited, totalCommands))
+        "第 %d 輪完成：送出 %d 個指令，雇員格數 %d → %d（本輪取回 %d 格，等待落地 %.2f 秒，累計指令 %d 次，收尾方式=%s）。",
+        pass, sentThisPass, before, after, movedThisPass, waited, totalCommands,
+        exhausted and "IPC 回報沒有更多" or "送滿本輪上限"))
 
     if after == 0 then
         stopReason = INCLUDE_CRYSTALS and "全部取完" or "道具頁全部取完（未取水晶）"
