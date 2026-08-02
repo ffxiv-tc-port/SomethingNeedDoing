@@ -226,10 +226,17 @@ public unsafe class InventoryModule : LuaModuleBase
             AgentSalvage.Instance()->AgentInterface.ReceiveEvent(&retval, param.GetPointer(0), 2, 1);
         }
 
-        [LuaDocs]
+        // 🔴 第 5 個引數 a6 是「這次搬移要不要送給伺服器」的總開關,不是無關緊要的 unknown。
+        // a6=false(預設值)時遊戲只更新本機容器並刷新 UI,一個封包都不送 —— 對**任何**容器都成立,
+        // 包含背包→背包。畫面上道具會動,但伺服器根本不知道,下一次同步就彈回原處。
+        // 原本這裡省略了 a6,所以任何用這個 API 的 Lua 巨集都只改本機、靜默失敗。
+        // 遊戲自己的拖放處理常式走的就是 a6=true,這裡照做。
+        // ⚠️ 不做成可選參數:a6=false 對巨集作者沒有任何正當用途(只會製造本機與伺服器不一致),
+        //    而且維持原本的呼叫形狀就不會動到 NLua 的參數繫結,既有腳本一行都不用改。
+        [LuaDocs(description: "Moves this item to the first empty slot of the given container. The move is sent to the server, i.e. it is a real move and not a local-only change.")]
         [Changelog("12.51")]
         public void MoveItemSlot(InventoryType destinationContainer)
-            => InventoryManager.Instance()->MoveItemSlot(Container, (ushort)Slot, destinationContainer, GetFirstEmptySlot(destinationContainer));
+            => InventoryManager.Instance()->MoveItemSlot(Container, (ushort)Slot, destinationContainer, GetFirstEmptySlot(destinationContainer), a6: true);
     }
 
     private static unsafe ushort GetFirstEmptySlot(InventoryType container)
