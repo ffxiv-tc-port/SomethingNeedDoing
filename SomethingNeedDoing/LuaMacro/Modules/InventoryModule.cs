@@ -233,18 +233,39 @@ public unsafe class InventoryModule : LuaModuleBase
         // 遊戲自己的拖放處理常式走的就是 a6=true,這裡照做。
         // ⚠️ 不做成可選參數:a6=false 對巨集作者沒有任何正當用途(只會製造本機與伺服器不一致),
         //    而且維持原本的呼叫形狀就不會動到 NLua 的參數繫結,既有腳本一行都不用改。
-        [LuaDocs(description: "Moves this item to the first empty slot of the given container. The move is sent to the server, i.e. it is a real move and not a local-only change.")]
+        // ⚠️ 目的地滿的時候**不搬**。GetFirstEmptySlot 找不到空格時原本回傳 0,
+        // 在 a6 被省略的年代那只是本機亂改、沒有後果;現在封包會真的送出去,
+        // 那就變成「與目的地 0 號格對調」——使用者沒要求的行為,而且只在容器剛好滿的時候
+        // 才發生,很難重現。改成明確不動作並留下記錄。
+        [LuaDocs(description: "Moves this item to the first empty slot of the given container. Does nothing if the destination has no empty slot. The move is sent to the server, i.e. it is a real move and not a local-only change.")]
         [Changelog("12.51")]
         public void MoveItemSlot(InventoryType destinationContainer)
-            => InventoryManager.Instance()->MoveItemSlot(Container, (ushort)Slot, destinationContainer, GetFirstEmptySlot(destinationContainer), a6: true);
+        {
+            if (GetFirstEmptySlot(destinationContainer) is not { } destinationSlot)
+            {
+                FrameworkLogger.Warning(
+                    $"MoveItemSlot: {destinationContainer} has no empty slot, item {ItemId} in {Container}#{Slot} was not moved.");
+                return;
+            }
+
+            InventoryManager.Instance()->MoveItemSlot(Container, (ushort)Slot, destinationContainer, destinationSlot, a6: true);
+        }
     }
 
-    private static unsafe ushort GetFirstEmptySlot(InventoryType container)
+    /// <summary>
+    /// 目的地容器的第一個空格,找不到就回 <c>null</c>。
+    /// 🔴 不要改回「找不到就回 0」:呼叫端會拿它當落點,而 0 號格通常是有東西的,
+    /// 搬過去就是把兩件道具對調。容器讀不到(未載入／無效的 InventoryType)同樣回 null,
+    /// 免得對空指標解參考——那是攔不到的 AccessViolation。
+    /// </summary>
+    private static unsafe ushort? GetFirstEmptySlot(InventoryType container)
     {
         var cont = InventoryManager.Instance()->GetInventoryContainer(container);
+        if (cont == null) return null;
+
         for (ushort i = 0; i < cont->Size; i++)
             if (cont->Items[i].ItemId == 0)
                 return i;
-        return 0;
+        return null;
     }
 }
