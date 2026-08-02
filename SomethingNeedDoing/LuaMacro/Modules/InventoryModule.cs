@@ -102,16 +102,28 @@ public unsafe class InventoryModule : LuaModuleBase
 
     public unsafe class InventoryContainerWrapper(InventoryType container) : IWrapper
     {
-        private readonly InventoryContainer* _container = InventoryManager.Instance()->GetInventoryContainer(container);
-        [LuaDocs] public int Count => _container->Size;
+        // 🔴 容器可能拿不到（管理器尚未初始化、或該容器當下沒載入，例如雇員/部隊置物櫃
+        // 沒開的時候）。解參考 null 產生的是 AccessViolationException——在 .NET Core 屬
+        // corrupted-state exception，Lua 的 pcall 與 C# 的 try/catch 都攔不到，會直接把
+        // 遊戲帶走。而這個包裝類別是任何一支 Lua 巨集寫 `Inventory.某容器.Count` 就到得了的。
+        // AutoRetainer 對同一個呼叫本來就有 null 檢查，這裡補齊。
+        private readonly InventoryContainer* _container =
+            InventoryManager.Instance() is var mgr && mgr != null ? mgr->GetInventoryContainer(container) : null;
+
+        /// <summary>容器拿不到時回 0（＝視為空容器），呼叫端的迴圈自然不會執行。</summary>
+        [LuaDocs] public int Count => _container == null ? 0 : _container->Size;
 
         [LuaDocs]
         public int FreeSlots
         {
             get
             {
+                if (_container == null)
+                    return 0;
+
                 var count = 0;
-                for (var i = 0; i < Count; i++)
+                var size = _container->Size;
+                for (var i = 0; i < size; i++)
                     if (_container->Items[i].ItemId == 0)
                         count++;
                 return count;
@@ -124,13 +136,19 @@ public unsafe class InventoryModule : LuaModuleBase
             get
             {
                 List<InventoryItemWrapper> list = [];
-                for (var i = 0; i < Count; i++)
+                if (_container == null)
+                    return list;
+
+                var size = _container->Size;
+                for (var i = 0; i < size; i++)
                     if (_container->Items[i].ItemId != 0)
                         list.Add(new(_container, i));
                 return list;
             }
         }
 
+        // ⚠️ 索引子在容器拿不到時仍會回一個包著 null 的 wrapper——維持既有行為（不丟例外），
+        // 但呼叫端在 Count == 0 時本來就不該走到這裡。
         [LuaDocs] public InventoryItemWrapper this[int index] => new(_container, index);
     }
 
