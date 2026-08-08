@@ -43,6 +43,11 @@ public unsafe class OceanFishingWrapper : IWrapper
     private static byte MissionGoal(uint missionType)
         => GetDirectorOrNull() == null ? (byte)0 : GetRow<IKDPlayerMissionCondition>(missionType)?.Unknown1 ?? 0;
 
+    // 上面每個屬性在「不在海釣」時都回安全預設值(0 / false),但那些預設值與副本內
+    // 真的取到 0 完全分不出來——CurrentRoute 就是實例:route 0 是合法航路。
+    // 所以另外給 Lua 一個明確的「人在不在海釣裡」判斷,不要逼巨集去猜。
+    [LuaDocs] public bool IsInOceanFishing => GetDirectorOrNull() != null;
+
     [LuaDocs] public uint CurrentRoute { get { var d = GetDirectorOrNull(); return d == null ? 0u : d->CurrentRoute; } }
 
     [LuaDocs]
