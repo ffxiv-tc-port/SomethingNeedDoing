@@ -114,7 +114,23 @@ public unsafe class InstancesModule : LuaModuleBase
         [LuaDocs][Changelog("12.8")] public Vector3 Vector3 => new(XFloat, 0, YFloat); // TODO use navmesh PointOnFloor
 
         [LuaDocs][Changelog("12.22")] public void SetFlagMapMarker(uint territoryId, uint mapId, float x, float y) => AgentMap.Instance()->SetFlagMapMarker(territoryId, mapId, new Vector3(x, 0, y));
-        [LuaDocs][Changelog("12.22")] public void SetFlagMapMarker(uint territoryId, float x, float y) => SetFlagMapMarker(territoryId, GetRow<Sheets.TerritoryType>(territoryId)!.Value.Map.RowId, x, y);
+
+        [LuaDocs]
+        [Changelog("12.22")]
+        public void SetFlagMapMarker(uint territoryId, float x, float y)
+        {
+            // territoryId 是 Lua 巨集的參數,也就是使用者輸入。台服 TerritoryType 的 id 是
+            // 1..1333,但中間有 4 段空洞(23、32-127、165、173),1333 個 id 只有 1234 個真的存在。
+            // 打錯 id 時 GetRow 會回 null,原本的 !.Value 會擲 InvalidOperationException 把整個
+            // 巨集打斷。改成照本檔既有慣例記一行錯誤後安全返回。
+            var territory = GetRow<Sheets.TerritoryType>(territoryId);
+            if (territory == null)
+            {
+                FrameworkLogger.Error($"Invalid territory ID: {territoryId}");
+                return;
+            }
+            SetFlagMapMarker(territoryId, territory.Value.Map.RowId, x, y);
+        }
     }
 
     public class MapMarkerDataWrapper(MapMarkerData data) : IWrapper

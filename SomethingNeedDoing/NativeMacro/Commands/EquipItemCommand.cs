@@ -52,7 +52,11 @@ public class EquipItemCommand(string text, uint itemId) : MacroCommandBase(text)
 
         if (pos == null)
         {
-            FrameworkLogger.Error($"Failed to find item {GetRow<Sheets.Item>(itemId)!.Value.Name} (ID: {itemId}) in inventory");
+            // 這行本身就在「找不到道具」的錯誤回報路徑上。itemId 來自巨集參數,超出 Item 表範圍時
+            // GetRow 回 null,原本的 !.Value 會讓錯誤訊息自己先擲 InvalidOperationException——
+            // 真正要回報的錯誤(道具不在背包裡)反而被蓋掉。查不到名字就退回 #<id> 這個字面替代名。
+            var itemName = GetRow<Sheets.Item>(itemId)?.Name.ToString() ?? $"#{itemId}";
+            FrameworkLogger.Error($"Failed to find item {itemName} (ID: {itemId}) in inventory");
             return;
         }
 
