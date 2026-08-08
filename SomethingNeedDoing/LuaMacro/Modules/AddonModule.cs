@@ -45,7 +45,7 @@ public unsafe class AddonModule : LuaModuleBase
     private static void DetourReceiveEvent(AtkUnitBase* thisPtr, AtkEventType eventType, int which, AtkEvent* atkEvent, AtkEventData* data)
     {
         Svc.Log.Info($"[DebugHook] addon={thisPtr->NameString} type={eventType} which={which}");
-        _debugHook!.Original(thisPtr, eventType, which, atkEvent, data);
+        _debugHook!.OriginalDisposeSafe(thisPtr, eventType, which, atkEvent, data);
     }
 
     [LuaFunction] public AddonWrapper GetAddon(string name) => new(name);
