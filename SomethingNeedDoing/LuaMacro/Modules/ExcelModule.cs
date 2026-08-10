@@ -121,6 +121,15 @@ public class ExcelModule : LuaModuleBase
         internal const BindingFlags PropertyFlags = BindingFlags.Public | BindingFlags.Instance |
                                                    BindingFlags.IgnoreCase | BindingFlags.DeclaredOnly;
 
+        // 指到別張表的欄位(RowRef<T>)會被包成另一個 ExcelRowWrapper,但包裝本身沒有把「它指到第幾列」
+        // 露出來,所以 Lua 端拿得到那一列的欄位、卻永遠問不出它的 id —— 而「這個道具的
+        // EquipSlotCategory / ItemUICategory 是不是某一組之一」這種判斷需要的正是 id。
+        // 沒有它就只能改用該列的名稱字串比對,那會隨語言變。
+        // ⚠️ 泛型的 RowRef<T> 與非泛型的 RowRef 走的是不同分支:非泛型那條本來就直接回傳 id,
+        //    這裡補的是泛型那條。
+        [LuaDocs(description: "The row id this wrapper refers to. Mainly useful on a wrapper obtained from a RowRef field, where it is the only way to tell which row the reference points at.")]
+        public uint RowId => rowId;
+
         [LuaDocs] public object? this[string propertyName] => GetPropertyValue(row, propertyName);
 
         private static object? GetPropertyValue(object? obj, string propertyName)

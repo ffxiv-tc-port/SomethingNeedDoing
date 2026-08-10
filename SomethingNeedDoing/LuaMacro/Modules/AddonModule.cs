@@ -64,6 +64,52 @@ public unsafe class AddonModule : LuaModuleBase
         return names;
     }
 
+    // ── 雇員清單 ──────────────────────────────────────────────────────────
+    // 🔴 RetainerList 的選取事件不是「送一個整數」那麼單純:遊戲要的是
+    //    (int 2, uint index, 未定義值, 未定義值),其中後兩個是 Type = 0 的 AtkValue。
+    //    巨集的 /callback 只能送出整數/字串,寫不出「未定義」這種型別,照著索引硬送會變成
+    //    另一組參數 —— 而 addon 對參數型別不對的反應是靜默不動作,不是報錯。
+    // 🔴 而且 Retainers 永遠是**固定 10 格**,沒用到的格子照樣有 Entry,名字讀到的是空字串或
+    //    殘留值。所以「第 N 個雇員」必須以 IsActive 過濾之後再算,不能直接拿 addon 的槽位當序號。
+    // 這兩件事都已經在 ECommons 的 AddonMaster.RetainerList 裡處理好(AutoRetainer 正式流程走的
+    // 就是它),這裡直接用它,不要在 Lua 端重新發明。
+
+    [LuaFunction(description: "Names of the retainers in the open RetainerList addon, in list order, with the addon's unused fixed slots filtered out. Returns an empty list if the addon is not open or ready.")]
+    public List<string> GetRetainerEntryNames()
+    {
+        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName("RetainerList").Address;
+        if (addon == null || !IsAddonReady(addon))
+            return [];
+
+        var names = new List<string>();
+        foreach (var entry in new AddonMaster.RetainerList((nint)addon).Retainers)
+        {
+            if (!entry.IsActive) continue;
+            names.Add(entry.Name);
+        }
+        return names;
+    }
+
+    [LuaFunction(description: "Selects the named retainer in the open RetainerList addon, using the game's own entry activation. Returns false (and does nothing) if the addon is not open/ready or no active entry carries that name - match is exact.")]
+    public bool SelectRetainerEntryByName(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return false;
+
+        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName("RetainerList").Address;
+        if (addon == null || !IsAddonReady(addon))
+            return false;
+
+        foreach (var entry in new AddonMaster.RetainerList((nint)addon).Retainers)
+        {
+            // IsActive 要先驗:Select() 對未使用的格子是 no-op 回 false,但名字比對本身會讀到殘留值。
+            if (!entry.IsActive) continue;
+            if (entry.Name != name) continue;
+            return entry.Select();
+        }
+        return false;
+    }
+
     [LuaFunction(description: "If the ContextMenu addon is open, selects the entry whose text matches the given label. Returns true if selected.")]
     public bool SelectContextMenuEntry(string label)
     {
