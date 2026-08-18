@@ -15,8 +15,52 @@ public unsafe class InstancesModule : LuaModuleBase
     [LuaFunction] public DutyFinderWrapper DutyFinder => new();
     public unsafe class DutyFinderWrapper : IWrapper
     {
-        [LuaDocs] public void OpenRouletteDuty(byte contentRouletteID) => AgentContentsFinder.Instance()->OpenRouletteDuty(contentRouletteID);
-        [LuaDocs] public void OpenRegularDuty(uint contentsFinderCondition) => AgentContentsFinder.Instance()->OpenRegularDuty(contentsFinderCondition);
+        // ── Instance() 的四種形態,決定要不要判空 ─────────────────────────────────
+        // 這份分類適用整個檔案(以及任何抄這裡寫法的地方)。判別依據是 CS 那一側的宣告,
+        // 不是型別名字看起來像什麼:
+        //
+        //  A. [StaticAddress(sig, off)] 沒有 isPointer → 產生器出來的是 `return pInstance;`,
+        //     那是特徵碼解出來的靜態位址本身(組語是 lea rcx, [rip+x]),永遠不是 null;
+        //     特徵碼失配時走的是 ThrowHelper.ThrowNullAddress(擲 InvalidOperationException),
+        //     也不是回 null。⇒ 對 A 類判空是死碼,不要加。
+        //     本檔的 ContentsFinder / UIState / Telepo 屬此類。
+        //  B. [StaticAddress(sig, off, isPointer: true)] → 產生器出來的是 `return *ppInstance;`,
+        //     解出來的是「存放指標的位址」,解參考結果會是 null(物件還沒建立)。⇒ 必須判。
+        //     本檔的 Framework / EnvManager 屬此類。
+        //  C. [Agent(...)] 產生的、以及 CS 裡手寫的 Instance() → 實作逐字帶 `== null ? null :`
+        //     (先走 AgentModule.Instance() → UIModule,未登入時是 null)。⇒ 必須判。
+        //     本檔的 AgentContentsFinder / AgentMap 屬此類。
+        //  D. Instance() 之後再往下走的成員(GetQueueInfo() / CurrentFate / InfoProxy …)
+        //     各自有各自的 null 路徑,要分開判,與 Instance() 屬哪一類無關。
+        //
+        // 失敗語意的分界(照 d605137 既有慣例):**使用者明確呼叫的動作型方法**取不到就記一行
+        // 錯誤(安靜失敗會讓人以為指令送出去了);**巨集會放在等待迴圈裡輪詢的存取子**安靜回
+        // 預設值(每幀記一行會把整份 log 洗掉)。
+
+        // C 類 + 動作型 ⇒ 記錯誤。
+        [LuaDocs]
+        public void OpenRouletteDuty(byte contentRouletteID)
+        {
+            var agent = AgentContentsFinder.Instance();
+            if (agent == null)
+            {
+                FrameworkLogger.Error("Duty finder agent is unavailable (not logged in?)");
+                return;
+            }
+            agent->OpenRouletteDuty(contentRouletteID);
+        }
+
+        [LuaDocs]
+        public void OpenRegularDuty(uint contentsFinderCondition)
+        {
+            var agent = AgentContentsFinder.Instance();
+            if (agent == null)
+            {
+                FrameworkLogger.Error("Duty finder agent is unavailable (not logged in?)");
+                return;
+            }
+            agent->OpenRegularDuty(contentsFinderCondition);
+        }
 
         [LuaDocs]
         [Changelog("12.69")]
@@ -46,6 +90,12 @@ public unsafe class InstancesModule : LuaModuleBase
             QueueInfo->QueueRoulette(contentRouletteId);
         }
 
+        // 以下到本類別結尾的 ContentsFinder 與 UIState 全是 A 類,Instance() 永遠不是 null,
+        // 所以刻意不加判空(加了是死碼)。
+        // GetQueueInfo() 這一層(D 類)同樣不必判:2026-08-19 離線反組譯台服執行檔,
+        // 該函式逐字只有兩條指令 —— lea rax, [rcx + 0x20] / ret,也就是 return &this->QueueInfo,
+        // 對得上 CS 的 [FieldOffset(0x20)] ContentsFinderQueueInfo QueueInfo,不存在回 null 的路徑。
+        // ⚠️ 台服改版後這個結論要重驗(偏移或函式形狀變了就不成立)。
         [LuaDocs][Changelog("12.69")] public void CancelQueue() => ContentsFinder.Instance()->GetQueueInfo()->CancelQueue();
         [LuaDocs][Changelog("12.73")] public uint GetPenaltyTimeRemainingInMinutes() => UIState.Instance()->InstanceContent.GetPenaltyRemainingInMinutes(0);
         [LuaDocs][Changelog("12.73")] public bool IsRouletteIncomplete(byte rouletteId) => UIState.Instance()->InstanceContent.IsRouletteIncomplete(rouletteId);
@@ -123,11 +173,35 @@ public unsafe class InstancesModule : LuaModuleBase
     public MapWrapper Map => new();
     public class MapWrapper : IWrapper
     {
+        // AgentMap 是 C 類:Instance() 走 AgentModule.Instance() → UIModule,未登入或換區
+        // 途中回 null。兩個都是巨集會輪詢的存取子 ⇒ 安靜回預設值,不記 log。
         [LuaDocs]
         [Changelog("12.8")]
-        public bool IsFlagMarkerSet => AgentMap.Instance()->FlagMarkerCount > 0;
+        public bool IsFlagMarkerSet
+        {
+            get
+            {
+                var agent = AgentMap.Instance();
+                if (agent == null) return false;
+                return agent->FlagMarkerCount > 0;
+            }
+        }
 
-        [LuaDocs][Changelog("12.8")] public FlagWrapper Flag => new(AgentMap.Instance()->FlagMapMarkers[0]);
+        // 取不到代理人時回一個全零的 FlagWrapper,不是 null:回 null 到 Lua 端就是 nil,
+        // 巨集寫 Instances.Map.Flag.TerritoryId 會直接以 "attempt to index a nil value" 中斷,
+        // 那比拿到 0 更難處理。全零與「旗標從來沒設過」是同一個結果(本來就沒有先看
+        // FlagMarkerCount 才讀 [0]),要分辨「有沒有旗標」請用 IsFlagMarkerSet。
+        [LuaDocs]
+        [Changelog("12.8")]
+        public FlagWrapper Flag
+        {
+            get
+            {
+                var agent = AgentMap.Instance();
+                if (agent == null) return new(default);
+                return new(agent->FlagMapMarkers[0]);
+            }
+        }
     }
 
     public class FlagWrapper(FlagMapMarker data) : IWrapper
@@ -139,7 +213,20 @@ public unsafe class InstancesModule : LuaModuleBase
         [LuaDocs][Changelog("12.8")] public Vector2 Vector2 => new(XFloat, YFloat);
         [LuaDocs][Changelog("12.8")] public Vector3 Vector3 => new(XFloat, 0, YFloat); // TODO use navmesh PointOnFloor
 
-        [LuaDocs][Changelog("12.22")] public void SetFlagMapMarker(uint territoryId, uint mapId, float x, float y) => AgentMap.Instance()->SetFlagMapMarker(territoryId, mapId, new Vector3(x, 0, y));
+        // C 類 + 動作型(在地圖上插旗)⇒ 取不到代理人記一行錯誤再返回,
+        // 與下面那個多載的 territoryId 檢查同一個慣例。
+        [LuaDocs]
+        [Changelog("12.22")]
+        public void SetFlagMapMarker(uint territoryId, uint mapId, float x, float y)
+        {
+            var agent = AgentMap.Instance();
+            if (agent == null)
+            {
+                FrameworkLogger.Error("Map agent is unavailable (not logged in?)");
+                return;
+            }
+            agent->SetFlagMapMarker(territoryId, mapId, new Vector3(x, 0, y));
+        }
 
         [LuaDocs]
         [Changelog("12.22")]
@@ -182,14 +269,28 @@ public unsafe class InstancesModule : LuaModuleBase
     [LuaFunction] public FrameworkWrapper Framework => new();
     public class FrameworkWrapper : IWrapper
     {
-        [LuaDocs][Changelog("12.9")] public long EorzeaTime => FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance()->ClientTime.EorzeaTime;
-        [LuaDocs][Changelog("12.9")] public byte ClientLanguage => FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance()->ClientLanguage;
-        [LuaDocs][Changelog("12.9")] public byte Region => FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance()->Region;
+        // B 類:Framework 是 [StaticAddress("48 8B 1D ?? ?? ?? ?? 8B 7C 24 64", 3, isPointer: true)],
+        // 產生器出來的是 return *ppInstance;。外掛載入時 Framework 幾乎一定已經在了
+        // (Dalamud 自己的 Framework 服務就靠它),所以這條路很難走到 —— 但「很難走到」
+        // 不是「不會走到」,而走到的代價是 AVE(攔不到、直接關遊戲)。
+        // 三個都是輪詢型存取子 ⇒ 安靜回預設值。
+        private static FFXIVClientStructs.FFXIV.Client.System.Framework.Framework* GetFramework() => FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
+
+        [LuaDocs][Changelog("12.9")] public long EorzeaTime { get { var f = GetFramework(); if (f == null) return 0L; return f->ClientTime.EorzeaTime; } }
+
+        // ⚠️ 這兩個刻意不回 0:0 是合法值(語言 0 = 日文,區域 0 也真的存在),回 0 等於
+        //    謊報一個具體答案。byte.MaxValue 不對應任何合法的語言/區域,巨集拿它去比對
+        //    (台服的 ClientLanguage 回報值是 7)一定是 false,不會被誤導。
+        [LuaDocs][Changelog("12.9")] public byte ClientLanguage { get { var f = GetFramework(); if (f == null) return byte.MaxValue; return f->ClientLanguage; } }
+        [LuaDocs][Changelog("12.9")] public byte Region { get { var f = GetFramework(); if (f == null) return byte.MaxValue; return f->Region; } }
     }
 
     [LuaFunction] public TelepoWrapper Telepo => new();
     public class TelepoWrapper : IWrapper
     {
+        // Telepo 與 UIState 都是 A 類([StaticAddress] 沒有 isPointer),Instance() 永遠不是
+        // null,所以這三個刻意不加判空 —— 加了是死碼。
+        // ⚠️ 「傳送清單是空的」是另一回事(那要先 UpdateAetheryteList),不是 null 問題,本次不動。
         [LuaDocs][Changelog("12.18")] public void Teleport(IAetheryteEntry aetheryte) => FFXIVClientStructs.FFXIV.Client.Game.UI.Telepo.Instance()->Teleport(aetheryte.AetheryteId, aetheryte.SubIndex);
         [LuaDocs][Changelog("12.18")] public void Teleport(uint aetheryteId, byte subIndex) => FFXIVClientStructs.FFXIV.Client.Game.UI.Telepo.Instance()->Teleport(aetheryteId, subIndex);
         [LuaDocs][Changelog("12.18")] public Vector3 GetAetherytePosition(uint aetheryteId) => ECommons.GameHelpers.Map.AetherytePosition(aetheryteId);
@@ -199,11 +300,20 @@ public unsafe class InstancesModule : LuaModuleBase
     [LuaFunction] public EnvManagerWrapper EnvManager => new();
     public class EnvManagerWrapper : IWrapper
     {
-        [LuaDocs][Changelog("12.20")] public float DayTimeSeconds => FFXIVClientStructs.FFXIV.Client.Graphics.Environment.EnvManager.Instance()->DayTimeSeconds;
-        [LuaDocs][Changelog("12.20")] public float ActiveTransitionTime => FFXIVClientStructs.FFXIV.Client.Graphics.Environment.EnvManager.Instance()->ActiveTransitionTime;
-        [LuaDocs][Changelog("12.20")] public float CurrentTransitionTime => FFXIVClientStructs.FFXIV.Client.Graphics.Environment.EnvManager.Instance()->CurrentTransitionTime;
-        [LuaDocs][Changelog("12.20")] public byte ActiveWeather => FFXIVClientStructs.FFXIV.Client.Graphics.Environment.EnvManager.Instance()->ActiveWeather;
-        [LuaDocs][Changelog("12.20")] public float TransitionTime => FFXIVClientStructs.FFXIV.Client.Graphics.Environment.EnvManager.Instance()->TransitionTime;
+        // B 類:EnvManager 是 [StaticAddress("0F 28 F2 48 8B 05", 6, isPointer: true)],
+        // 產生器出來的是 return *ppInstance; —— 圖形環境管理器在標題畫面/讀取畫面尚未建立
+        // 時解參考結果是 null。這五個正是巨集最常拿去寫「等某個天氣」迴圈的欄位,每幀輪詢,
+        // ⇒ 一律安靜回預設值,不記 log。
+        private static FFXIVClientStructs.FFXIV.Client.Graphics.Environment.EnvManager* GetEnvManager() => FFXIVClientStructs.FFXIV.Client.Graphics.Environment.EnvManager.Instance();
+
+        [LuaDocs][Changelog("12.20")] public float DayTimeSeconds { get { var e = GetEnvManager(); if (e == null) return 0f; return e->DayTimeSeconds; } }
+        [LuaDocs][Changelog("12.20")] public float ActiveTransitionTime { get { var e = GetEnvManager(); if (e == null) return 0f; return e->ActiveTransitionTime; } }
+        [LuaDocs][Changelog("12.20")] public float CurrentTransitionTime { get { var e = GetEnvManager(); if (e == null) return 0f; return e->CurrentTransitionTime; } }
+
+        // 台服 7.20 的 Weather 表第 0 列是空白列(Name / Description 皆空、Icon = 0),
+        // 所以 0 本來就是「沒有天氣」,拿它當取不到時的預設值不會和任何真實天氣撞號。
+        [LuaDocs][Changelog("12.20")] public byte ActiveWeather { get { var e = GetEnvManager(); if (e == null) return 0; return e->ActiveWeather; } }
+        [LuaDocs][Changelog("12.20")] public float TransitionTime { get { var e = GetEnvManager(); if (e == null) return 0f; return e->TransitionTime; } }
     }
 
     [LuaFunction][Changelog("12.22")] public BuddyWrapper Buddy => new();
