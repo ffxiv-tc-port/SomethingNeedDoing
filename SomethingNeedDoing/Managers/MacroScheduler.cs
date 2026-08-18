@@ -831,7 +831,7 @@ public class MacroScheduler : IMacroScheduler, IDisposable
 
     private void CheckCharacterPostProcess(IMacro macro)
     {
-        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.ClientState.LocalContentId))
+        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == SvcEx.PlayerState.ContentId))
             FrameworkLogger.Info($"Skipping post process macro {macro.Name} for current character.");
         else
             _arApis[macro.Id].RequestCharacterPostprocess();
@@ -839,14 +839,14 @@ public class MacroScheduler : IMacroScheduler, IDisposable
 
     private void DoCharacterPostProcess(IMacro macro)
     {
-        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.ClientState.LocalContentId))
+        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == SvcEx.PlayerState.ContentId))
         {
             FrameworkLogger.Info($"Skipping post process macro {macro.Name} for current character.");
             return;
         }
 
         FrameworkLogger.Info($"Executing post process macro {macro.Name} for current character.");
-        var eventData = new Dictionary<string, object> { { "Id", Svc.ClientState.LocalContentId }, { "Name", Svc.ClientState.LocalPlayer?.Name.TextValue ?? string.Empty } };
+        var eventData = new Dictionary<string, object> { { "Id", SvcEx.PlayerState.ContentId }, { "Name", Svc.Objects.LocalPlayer?.Name.TextValue ?? string.Empty } };
         _ = _triggerEventManager.RaiseTriggerEvent(TriggerEvent.OnAutoRetainerCharacterPostProcess, eventData);
     }
 
