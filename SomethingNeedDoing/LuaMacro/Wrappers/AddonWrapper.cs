@@ -133,54 +133,159 @@ public unsafe class AddonWrapper(string name) : IWrapper
         return true;
     }
 
-    [LuaDocs] public NodeWrapper GetNode(params int[] nodeIds) => new(Addon, nodeIds);
+    // 傳的是 addon 的「名字」不是「指標」:NodeWrapper 每次存取都要自己重新 GetAddonByName,
+    // 把指標交出去等於又把生命週期凍結回來。
+    [LuaDocs] public NodeWrapper GetNode(params int[] nodeIds) => new(name, nodeIds);
+
+    // 這個 helper 刻意不是 iterator:iterator 的方法體裡不能出現指標,也不能有 ref struct(Span)
+    // 的區域變數。先在這裡把每個節點的「身分」抄成純受控資料,再交給 Nodes 包成 wrapper。
+    private List<(int Index, uint NodeId)> NodeIdentities()
+    {
+        var addon = Addon;
+        if (addon == null || addon->UldManager.NodeList == null) return [];
+
+        var nodes = addon->UldManager.Nodes;
+        var list = new List<(int, uint)>(nodes.Length);
+        for (var i = 0; i < nodes.Length; i++)
+        {
+            var node = nodes[i].Value;
+            list.Add((i, node == null ? 0u : node->NodeId));
+        }
+        return list;
+    }
 
     [LuaDocs]
-    public unsafe IEnumerable<NodeWrapper> Nodes
+    public IEnumerable<NodeWrapper> Nodes
     {
         get
         {
-            foreach (var node in NodeList)
-                yield return new NodeWrapper(node);
+            var identities = NodeIdentities();
+            var result = new List<NodeWrapper>(identities.Count);
+            foreach (var (index, nodeId) in identities)
+                result.Add(NodeWrapper.FromNodeList(name, index, nodeId));
+            return result;
         }
     }
 }
 
+// 🔴 這一層原本在建構時就把 AtkResNode* 凍結下來,而 Lua 巨集的典型寫法是:
+//
+//        local node = Addons.GetAddon("Foo"):GetNode(1, 2, 3)
+//        yield("/wait 1")        -- 視窗在這一秒裡被關掉、或整個重建
+//        LogInfo(node.Text)      -- 指標指向已經被釋放的節點
+//
+//    節點記憶體由 addon 的 UldManager 擁有:addon 關閉會整批釋放,重開會重新配置(位址不會一樣)。
+//    對釋放後的節點解參考是 AccessViolationException —— 在 .NET Core 屬於 corrupted-state
+//    exception,C# 的 try/catch 與 Lua 的 pcall 都攔不到,遊戲當場關閉。
+//    ⚠️ 判空對這件事沒有用:指標不是 null,只是不再指向那個節點。
+//
+// ⇒ 改成存「怎麼找到它」而不是「它在哪」,每次屬性存取重走一次解析。樣板就是同檔的
+//   AddonWrapper.Addon:那裡只存 addon 名稱,每次都重新 GetAddonByName。
+//
+// 兩種解析模式:
+//   1. ID 鏈(AddonWrapper.GetNode 建立的):存 addon 名 + node id 鏈,每次重走
+//      GetNodeByIDChain(addon->RootNode, ids)。這是完整、可重現的路徑。
+//   2. 節點清單(AddonWrapper.Nodes 列舉出來的):ULD 節點清單裡的節點不保證能用一條父子 id 鏈
+//      從 RootNode 走到(GetNodeByIDChain 只沿 ChildNode / 元件的 NodeList[0] 下降),所以改存
+//      addon 名 + 建構當下的槽位 + 節點自己的 NodeId:先看那一格、驗 NodeId 一致才採用,
+//      不一致就把整份清單掃一次。
+//      ⚠️ NodeId 為 0 的節點沒有可用的身分,那時只能相信槽位 —— 那仍然比凍結指標安全:
+//         指標是這一幀重讀的,槽位也對照過當下的 NodeListCount。
+//
+// 解析不到時每個屬性都回佔位值;巨集要分辨「節點不存在」與「節點值就是這樣」請先看 Exists。
 public unsafe class NodeWrapper : IWrapper
 {
-    // addon 為空指標時連 RootNode 都不能讀(GetNodeByIDChain 自己會擋空節點,但擋不到空的 addon)。
-    public NodeWrapper(AtkUnitBase* addon, params int[] nodeIds) => Node = addon == null ? null : GetNodeByIDChain(addon->RootNode, nodeIds);
-    public NodeWrapper(Pointer<AtkResNode> node) => Node = node.Value;
-    private AtkResNode* Node { get; set; }
+    private readonly string _addonName;
+    private readonly int[] _idChain;
+    private readonly int _listIndex;
+    private readonly uint _nodeId;
 
-    // 🔴 找不到節點時 Node 是空指標,底下每個屬性原本都會裸解參考它 → AccessViolationException,
-    // 那是 corrupted-state exception,Lua 端 pcall 與 C# 的 try/catch 都攔不到。
-    // 改成一律先驗指標;巨集要分辨「節點不存在」與「節點值就是這樣」請先看 Exists。
-    [LuaDocs(description: "Whether this wrapper actually resolved to a node. Check this before trusting the other properties: when it is false they return placeholder values (Id 0, NodeType 0 - neither is a valid real value - empty text, not visible).")]
+    /// <summary>ID 鏈模式:addon 名 + 從 RootNode 走下去的 node id 鏈。</summary>
+    public NodeWrapper(string addonName, params int[] nodeIds)
+    {
+        _addonName = addonName;
+        _idChain = nodeIds ?? [];
+        _listIndex = -1;
+        _nodeId = 0;
+    }
+
+    private NodeWrapper(string addonName, int listIndex, uint nodeId)
+    {
+        _addonName = addonName;
+        _idChain = [];
+        _listIndex = listIndex;
+        _nodeId = nodeId;
+    }
+
+    /// <summary>
+    /// 節點清單模式。用工廠方法而不是建構子多載:(string, int, uint) 會跟 (string, params int[])
+    /// 在呼叫端寫成整數字面值時撞號,靜默挑到錯的那個。
+    /// </summary>
+    internal static NodeWrapper FromNodeList(string addonName, int listIndex, uint nodeId) => new(addonName, listIndex, nodeId);
+
+    /// <summary>每次存取都重新解析。呼叫端一律先存進區域變數(單幀內安全),不要在同一個屬性裡讀兩次。</summary>
+    private AtkResNode* Node
+    {
+        get
+        {
+            var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(_addonName).Address;
+            if (addon == null) return null;
+
+            // 模式 1:GetNodeByIDChain 自己會擋空節點,擋不到空的 addon —— 上面那行擋掉了。
+            if (_idChain.Length > 0)
+                return GetNodeByIDChain(addon->RootNode, _idChain);
+
+            // 模式 2:Span 的建構子不驗指標,NodeList 為 null 時索引等同從位址 0 讀。
+            if (addon->UldManager.NodeList == null) return null;
+            var nodes = addon->UldManager.Nodes;
+
+            // 快路徑:節點多半還在建構當下那一格。
+            if (_listIndex >= 0 && _listIndex < nodes.Length)
+            {
+                var hinted = nodes[_listIndex].Value;
+                if (hinted != null && (_nodeId == 0 || hinted->NodeId == _nodeId)) return hinted;
+            }
+
+            if (_nodeId == 0) return null;
+
+            // 慢路徑:清單重排了,照 NodeId 找回來。
+            for (var i = 0; i < nodes.Length; i++)
+            {
+                var candidate = nodes[i].Value;
+                if (candidate != null && candidate->NodeId == _nodeId) return candidate;
+            }
+
+            return null;
+        }
+    }
+
+    [LuaDocs(description: "Whether this wrapper still resolves to a node right now. Check this before trusting the other properties: when it is false they return placeholder values (Id 0, NodeType 0 - neither is a valid real value - empty text, not visible).")]
     public bool Exists => Node != null;
 
-    [LuaDocs] public uint Id => Node == null ? 0 : Node->NodeId;
-    [LuaDocs] public bool IsVisible => Node != null && Node->IsVisible();
+    [LuaDocs] public uint Id { get { var node = Node; return node == null ? 0u : node->NodeId; } }
+    [LuaDocs] public bool IsVisible { get { var node = Node; return node != null && node->IsVisible(); } }
 
     [LuaDocs]
     public string Text
     {
         get
         {
-            if (Node == null) return string.Empty;
-            var textNode = Node->GetAsAtkTextNode();
+            var node = Node;
+            if (node == null) return string.Empty;
+            var textNode = node->GetAsAtkTextNode();
             return textNode == null ? string.Empty : textNode->NodeText.GetText();
         }
         set
         {
-            if (Node == null) return;
-            var textNode = Node->GetAsAtkTextNode();
+            var node = Node;
+            if (node == null) return;
+            var textNode = node->GetAsAtkTextNode();
             if (textNode == null) return;
             textNode->NodeText.SetString(value);
         }
     }
 
-    [LuaDocs] public NodeType NodeType => Node == null ? default : Node->Type;
+    [LuaDocs] public NodeType NodeType { get { var node = Node; return node == null ? default : node->Type; } }
 }
 
 public class AtkValueWrapper(AtkValue value) : IWrapper
