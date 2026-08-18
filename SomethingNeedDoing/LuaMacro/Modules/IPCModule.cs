@@ -34,6 +34,8 @@ public class IPCModule : LuaModuleBase
 
     public override void Register(Lua lua)
     {
+        RegisterIpcEnums(lua);
+
         lua.DoString($"{ModuleName} = {{}}");
 
         RegisterHelperFunctions(lua);
@@ -245,6 +247,71 @@ public class IPCModule : LuaModuleBase
         }
 
         docs.RegisterModule(this, moduleDocs);
+    }
+
+    /// <summary>
+    /// Registers every enum that appears in an IPC signature so Lua macros can name its members.
+    /// IPC 類別是執行期才建立的實例,不在 LuaModuleBase 的掃描範圍內,
+    /// 所以它們簽章上的列舉以前從來沒被註冊進 Lua。
+    /// </summary>
+    private void RegisterIpcEnums(Lua lua)
+    {
+        var enumTypes = new HashSet<Type>();
+        foreach (var instance in _ipcInstances.Values)
+        {
+            var type = instance.GetType();
+            foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance).Where(f => f.GetCustomAttribute<LuaFunctionAttribute>() != null))
+                GetEnumsFromType(field.FieldType, enumTypes);
+
+            foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance).Where(m => m.GetCustomAttribute<LuaFunctionAttribute>() != null))
+            {
+                GetEnumsFromType(method.ReturnType, enumTypes);
+                foreach (var parameter in method.GetParameters())
+                    GetEnumsFromType(parameter.ParameterType, enumTypes);
+            }
+        }
+
+        foreach (var enumType in enumTypes)
+        {
+            try
+            {
+                var registerEnumMethod = typeof(LuaExtensions).GetMethod("RegisterEnum", BindingFlags.Public | BindingFlags.Static);
+                registerEnumMethod?.MakeGenericMethod(enumType).Invoke(null, [lua]);
+            }
+            catch (Exception ex)
+            {
+                FrameworkLogger.Error($"Failed to register enum {enumType.Name}: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collects enum types out of a signature type, unwrapping Nullable, arrays and generic arguments.
+    /// </summary>
+    private void GetEnumsFromType(Type? type, HashSet<Type> enumTypes)
+    {
+        if (type == null) return;
+
+        if (Nullable.GetUnderlyingType(type) is { } underlying)
+            type = underlying;
+
+        if (type.IsArray)
+        {
+            GetEnumsFromType(type.GetElementType(), enumTypes);
+            return;
+        }
+
+        if (type.IsEnum)
+        {
+            enumTypes.Add(type);
+            return;
+        }
+
+        if (type.IsGenericType)
+        {
+            foreach (var arg in type.GetGenericArguments())
+                GetEnumsFromType(arg, enumTypes);
+        }
     }
 
     /// <summary>
