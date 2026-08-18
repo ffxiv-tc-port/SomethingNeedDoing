@@ -68,8 +68,34 @@ public unsafe class InstancesModule : LuaModuleBase
             get
             {
                 var friends = new List<FriendWrapper>();
-                for (var i = 0; i < AgentFriendlist.Instance()->InfoProxy->CharDataSpan.Length; i++)
-                    friends.Add(new(AgentFriendlist.Instance()->InfoProxy->CharDataSpan[i]));
+
+                // 這是 [LuaFunction] 底下的存取子,使用者巨集可以在任意時機呼叫(未登入、好友
+                // 名單代理人還沒建立、換區途中都算),原本整條 AgentFriendlist.Instance()->
+                // InfoProxy->CharDataSpan 是三層裸讀,三層各自都有真實的 null 路徑:
+                //  - AgentFriendlist.Instance() 走 AgentModule.Instance(),UIModule 尚未建立時回 null
+                //    (產生器出來的實作逐字是 agentModule == null ? null : ...);
+                //  - InfoProxy 是欄位 +0x28,好友名單資訊代理人還沒掛上時是 null;
+                //  - CharDataSpan = new ReadOnlySpan<>(CharData, EntryCount) —— CharData 為 null
+                //    而 EntryCount 非 0 時會做出一個指向位址 0 的 span,建構不報錯、取用才 AVE。
+                // 任一層取不到就回空清單(照本模組既有慣例:記一行錯誤後回預設值)。
+                var agentFriendlist = AgentFriendlist.Instance();
+                if (agentFriendlist == null || agentFriendlist->InfoProxy == null)
+                {
+                    FrameworkLogger.Error("Friend list is unavailable (agent or info proxy not ready)");
+                    return friends;
+                }
+
+                var infoProxy = agentFriendlist->InfoProxy;
+
+                // 名單一次都沒載入過時 CharData 是 null。這不是錯誤,安靜回空清單即可
+                // (原本 EntryCount 剛好是 0 時也是走到同樣的結果)。
+                if (infoProxy->CharData == null)
+                    return friends;
+
+                // 只解析一次 span;原本迴圈每次迭代都重跑整條鏈兩遍。
+                var charDataSpan = infoProxy->CharDataSpan;
+                for (var i = 0; i < charDataSpan.Length; i++)
+                    friends.Add(new(charDataSpan[i]));
                 return friends;
             }
         }
