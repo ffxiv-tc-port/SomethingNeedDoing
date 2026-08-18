@@ -44,8 +44,24 @@ public unsafe class AddonModule : LuaModuleBase
 
     private static void DetourReceiveEvent(AtkUnitBase* thisPtr, AtkEventType eventType, int which, AtkEvent* atkEvent, AtkEventData* data)
     {
+        // DebugUnhookReceiveEvent() 會把 _debugHook 設回 null,而它是 Lua 可呼叫的 ——
+        // SND 的巨集跑在自己的工作執行緒,這個 detour 卻在 UI 執行緒,兩者是真的會撞上的跨執行緒窗口。
+        // 所以欄位只讀一次、快照到區域變數,之後只用區域變數,不對欄位做第二次讀取。
+        var hook = _debugHook;
+
         Svc.Log.Info($"[DebugHook] addon={thisPtr->NameString} type={eventType} which={which}");
-        _debugHook!.OriginalDisposeSafe(thisPtr, eventType, which, atkEvent, data);
+
+        // 快照到手是 null ⇒ Dispose() 已經跑完、原始位元組已還原,這次呼叫沒有原始函式可以轉。
+        // (欄位不是 null 但 hook 已 Dispose 的情況由 OriginalDisposeSafe 自己處理,不必另外接。)
+        // ReceiveEvent 是事件監聽,不是寫 [this] 的建構子,略過只會漏掉這一次事件,
+        // 不會留下沒有 vtable 的半初始化物件 ⇒ 這裡用「略過」收尾是安全的。
+        if (hook == null)
+        {
+            Svc.Log.Information("[DebugHook] hook was removed mid-call; skipping the original call for this invocation.");
+            return;
+        }
+
+        hook.OriginalDisposeSafe(thisPtr, eventType, which, atkEvent, data);
     }
 
     [LuaFunction] public AddonWrapper GetAddon(string name) => new(name);
