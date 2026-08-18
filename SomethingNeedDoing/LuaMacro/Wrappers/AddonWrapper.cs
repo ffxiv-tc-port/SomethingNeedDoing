@@ -91,7 +91,7 @@ public unsafe class AddonWrapper(string name) : IWrapper
                 {
                     var textNode = n->GetAsAtkTextNode();
                     if (textNode != null)
-                        text = textNode->NodeText.ToString();
+                        text = textNode->NodeText.GetText();
                 }
             }
             catch { /* not a text node or unreadable, ignore */ }
@@ -169,7 +169,7 @@ public unsafe class NodeWrapper : IWrapper
         {
             if (Node == null) return string.Empty;
             var textNode = Node->GetAsAtkTextNode();
-            return textNode == null ? string.Empty : textNode->NodeText.ToString();
+            return textNode == null ? string.Empty : textNode->NodeText.GetText();
         }
         set
         {
