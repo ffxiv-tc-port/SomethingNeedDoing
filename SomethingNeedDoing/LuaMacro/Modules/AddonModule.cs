@@ -70,7 +70,24 @@ public unsafe class AddonModule : LuaModuleBase
     public List<string> GetVisibleAddonNames()
     {
         var names = new List<string>();
+
+        // RaptureAtkUnitManager.Instance() 是 CS 裡少數手寫的實作,逐字是
+        //   var raptureAtkModule = RaptureAtkModule.Instance();
+        //   return raptureAtkModule == null ? null : &raptureAtkModule->RaptureAtkUnitManager;
+        // ⇒ UIModule / RaptureAtkModule 還沒建立時(未登入、還在標題畫面)它回 null,
+        // 而 AllLoadedUnitsList 是 +0x6900 的內嵌欄位 —— 對 null 讀 Count 直接就是 AVE,
+        // 那是 corrupted-state exception,try/catch 攔不到。
+        // 這是使用者明確呼叫的診斷函式(不是輪詢型存取子),安靜回空清單會讓人以為
+        // 「真的一個 addon 都沒有」,所以照本外掛既有慣例記一行錯誤再回空清單。
         var manager = RaptureAtkUnitManager.Instance();
+        if (manager == null)
+        {
+            FrameworkLogger.Error("Addon list is unavailable (UI module not ready)");
+            return names;
+        }
+
+        // 📌 Count 是 ushort 而 Entries 是 FixedSizeArray256(產生器出來的是 Span),
+        //    萬一 Count > 256 會是 IndexOutOfRangeException 而不是 AVE,所以這裡不另外夾。
         for (var i = 0; i < manager->AllLoadedUnitsList.Count; i++)
         {
             var unit = manager->AllLoadedUnitsList.Entries[i].Value;

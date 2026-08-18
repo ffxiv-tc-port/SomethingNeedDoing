@@ -20,8 +20,16 @@ public unsafe class InstancedContentModule : LuaModuleBase
     {
         get
         {
-            var director = EventFramework.Instance()->GetContentDirector();
-            return director == null ? 0f : director->ContentTimeLeft;
+            // EventFramework 是 [StaticAddress(..., isPointer: true)],產生器出來的實作是
+            // `return *ppInstance;` —— 解出來的是「存放指標的位址」,副本框架尚未建立時
+            // 解參考結果就是 null(遊戲自己的取用點也帶 test rax,rax / jz,CS 給的特徵碼
+            // 裡逐字看得到)。原本只擋了 director 這一半,Instance() 那一半是裸讀。
+            // 這是巨集會拿去輪詢的存取子,取不到安靜回 0f(與原本 director == null 同一個結果)。
+            var framework = EventFramework.Instance();
+            if (framework == null) return 0f;
+            var director = framework->GetContentDirector();
+            if (director == null) return 0f;
+            return director->ContentTimeLeft;
         }
     }
 
