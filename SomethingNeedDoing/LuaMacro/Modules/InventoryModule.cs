@@ -60,10 +60,12 @@ public unsafe class InventoryModule : LuaModuleBase
         foreach (var type in Enum.GetValues<InventoryType>())
         {
             var container = InventoryManager.Instance()->GetInventoryContainer(type);
-            if (container == null) continue;
+            if (container == null || container->Items == null) continue;
             for (var i = 0; i < container->Size; i++)
                 if (container->Items[i].ItemId == itemId)
-                    return new(container, i);
+                    // 用 (容器型別, 格號) 建構,不要把 container 這個原生指標傳下去 ——
+                    // 包裝物件會被巨集跨幀留著,存進去的鍵必須是「身分」而不是「位址」。
+                    return new(type, i);
         }
         return null;
     }
@@ -73,13 +75,15 @@ public unsafe class InventoryModule : LuaModuleBase
     public List<InventoryItemWrapper> GetItemsInNeedOfRepairs(int durability = 0)
     {
         List<InventoryItemWrapper> list = [];
+        // GetInventoryContainer() 未登入時回 null;原本直接讀 container->Size 是攔不到的 AccessViolation。
         var container = InventoryManager.Instance()->GetInventoryContainer(InventoryType.EquippedItems);
+        if (container == null) return list;
         for (var i = 0; i < container->Size; i++)
         {
             var item = container->GetInventorySlot(i);
             if (item is null) continue;
             if (Convert.ToInt32(Convert.ToDouble(item->Condition) / 30000.0 * 100.0) <= durability)
-                list.Add(new(item));
+                list.Add(new(InventoryType.EquippedItems, i));
         }
         return list;
     }
@@ -90,12 +94,13 @@ public unsafe class InventoryModule : LuaModuleBase
     {
         List<InventoryItemWrapper> list = [];
         var container = InventoryManager.Instance()->GetInventoryContainer(InventoryType.EquippedItems);
+        if (container == null) return list;
         for (var i = 0; i < container->Size; i++)
         {
             var item = container->GetInventorySlot(i);
             if (item is null) continue;
             if (item->SpiritbondOrCollectability / 100 == 100)
-                list.Add(new(item));
+                list.Add(new(InventoryType.EquippedItems, i));
         }
         return list;
     }
@@ -106,25 +111,45 @@ public unsafe class InventoryModule : LuaModuleBase
         // 沒開的時候）。解參考 null 產生的是 AccessViolationException——在 .NET Core 屬
         // corrupted-state exception，Lua 的 pcall 與 C# 的 try/catch 都攔不到，會直接把
         // 遊戲帶走。而這個包裝類別是任何一支 Lua 巨集寫 `Inventory.某容器.Count` 就到得了的。
-        // AutoRetainer 對同一個呼叫本來就有 null 檢查，這裡補齊。
-        private readonly InventoryContainer* _container =
-            InventoryManager.Instance() is var mgr && mgr != null ? mgr->GetInventoryContainer(container) : null;
+        //
+        // 🔴 原本這裡在建構當下就把 GetInventoryContainer() 的結果凍結成 readonly 欄位。判空是有的,
+        //    但「凍結」本身是另一個問題:巨集的典型寫法是 `local bag = Inventory.RetainerPage1`
+        //    然後跨 yield/Sleep 反覆讀它。①建構時容器還沒載入 ⇒ 凍結了一個 null,之後就算雇員視窗
+        //    開了也永遠回 0(一個不會自己好起來的靜默失敗);②建構時載入了、之後卸載 ⇒ 手上那個指標
+        //    指向已經還給遊戲的記憶體,再讀就是攔不到的 AccessViolation。
+        // ⇒ 改成只存 InventoryType,每次存取重新查。查一次是一個 GetInventoryContainer 呼叫,
+        //   便宜到不需要快取。同一個存取子「內部」把結果放進區域變數(單幀之內安全),但不跨呼叫保存。
+        // ⚠️ InventoryManager.Instance() 的 [StaticAddress] 沒有 isPointer(產生器實作是
+        //    `return pInstance;`,靜態位址本身),特徵碼失配時擲例外、永遠不會回 null ——
+        //    對它判空是死碼,所以這裡刻意不判;GetInventoryContainer() 的回值則一定要判。
+        //    分類的完整說明見 InstancesModule.cs 檔頭。
+        private readonly InventoryType _type = container;
+
+        /// <summary>每次存取都重新解析出來的容器指標。呼叫端一律先存進區域變數,不要在同一個成員裡讀兩次。</summary>
+        private InventoryContainer* Container =>
+            _type == InventoryType.Invalid ? null : InventoryManager.Instance()->GetInventoryContainer(_type);
+
+        /// <summary>這個包裝物件現在指得到真的容器嗎（未登入／該容器尚未載入時為 false）。</summary>
+        [LuaDocs(description: "Whether this container can be resolved right now. False while it is not loaded, e.g. a retainer inventory before the retainer window has been opened.")]
+        [Changelog(ChangelogAttribute.Unreleased)]
+        public bool Exists => Container != null;
 
         /// <summary>容器拿不到時回 0（＝視為空容器），呼叫端的迴圈自然不會執行。</summary>
-        [LuaDocs] public int Count => _container == null ? 0 : _container->Size;
+        [LuaDocs] public int Count { get { var c = Container; return c == null ? 0 : c->Size; } }
 
         [LuaDocs]
         public int FreeSlots
         {
             get
             {
-                if (_container == null)
+                var c = Container;
+                if (c == null || c->Items == null)
                     return 0;
 
                 var count = 0;
-                var size = _container->Size;
+                var size = c->Size;
                 for (var i = 0; i < size; i++)
-                    if (_container->Items[i].ItemId == 0)
+                    if (c->Items[i].ItemId == 0)
                         count++;
                 return count;
             }
@@ -136,25 +161,61 @@ public unsafe class InventoryModule : LuaModuleBase
             get
             {
                 List<InventoryItemWrapper> list = [];
-                if (_container == null)
+                var c = Container;
+                if (c == null || c->Items == null)
                     return list;
 
-                var size = _container->Size;
+                var size = c->Size;
                 for (var i = 0; i < size; i++)
-                    if (_container->Items[i].ItemId != 0)
-                        list.Add(new(_container, i));
+                    if (c->Items[i].ItemId != 0)
+                        list.Add(new(_type, i));
                 return list;
             }
         }
 
-        // ⚠️ 索引子在容器拿不到時仍會回一個包著 null 的 wrapper——維持既有行為（不丟例外），
-        // 但呼叫端在 Count == 0 時本來就不該走到這裡。
-        [LuaDocs] public InventoryItemWrapper this[int index] => new(_container, index);
+        // 索引子照舊不丟例外。容器拿不到／索引越界時回一個「解析不到」的包裝物件,它的每個成員都回
+        // 中性值(見 InventoryItemWrapper 檔頭),不會解參考 null。
+        [LuaDocs] public InventoryItemWrapper this[int index] => new(_type, index);
     }
 
+    // 🔴 這個類別原本是 `private InventoryItem* Item { get; set; }` —— 建構當下把原生指標凍結下來,
+    //    然後底下 20 幾個 [LuaDocs] 成員全部裸寫 `Item->`。兩種失敗方式,都是紅線形狀:
+    //    ① 建構時掃不到道具(背包裡根本沒有、或未登入),Item 停在 null,第一次讀屬性就解參考 null;
+    //       (uint itemId) 建構子連「找不到」都沒有回報管道,呼叫端拿到的是一個看起來正常的物件。
+    //    ② 掃得到,但巨集的典型寫法就是把包裝物件存進區域變數跨 yield/Sleep 反覆讀:
+    //
+    //           local item = Inventory.Inventory1[0]
+    //           while item.Count > 0 do        -- 這裡每一次讀取都落在不同的幀
+    //               yield("/wait 1")
+    //           end
+    //
+    //       道具被用掉/賣掉/搬走、容器卸載(雇員視窗關掉)之後,那塊記憶體已經還給遊戲或改配給別人。
+    //    兩者的結果都是 AccessViolationException:在 .NET Core 屬 corrupted-state exception,
+    //    C# 的 try/catch 與 Lua 的 pcall 都攔不到,遊戲當場關閉。
+    //
+    // ⇒ 改成存「身分」不存「位址」,每次成員存取重新解析(樣板＝同 repo 的 EntityWrapper):
+    //      · 槽位鍵 (container, slot):使用者要的就是「這一格裡的東西」,重查就是重讀那一格。
+    //      · 道具鍵 (itemId):使用者要的是「那件道具」,而道具會換格,所以槽位只當提示;
+    //        提示對不上就重掃一次玩家自己的容器(清單與原本的建構子逐字相同)。
+    //    同一次成員存取「內部」一律先把解析結果放進區域變數(單幀之內安全),但不跨呼叫保存 ——
+    //    跨呼叫的快取就是這次要根治的那個 bug。
+    //
+    // 失敗語意(照 InstancesModule.cs 檔頭的成文分類):
+    //    · 巨集會放進等待迴圈輪詢的存取子 ⇒ 安靜回中性值,不記 log(每幀一行會把整份 log 洗掉)。
+    //      中性值一律取「空格子」的值(0 / false / null):遊戲對一格空的位置回的本來就是一個整塊
+    //      歸零的 InventoryItem,所以「解析不到」與「這一格是空的」在 Lua 面看起來一致,既有腳本
+    //      的判斷式不必多一種分支。要分辨兩者請用新增的 Exists。
+    //    · 使用者明確呼叫的動作型方法(Use / Desynth / OpenContextMenu / MoveItemSlot)⇒ 記一行
+    //      錯誤再返回;安靜失敗會讓巨集作者以為指令已經送出去了。
+    //
+    // ⚠️ Lua 面的成員名稱、參數與回傳型別一個都沒有改,既有腳本一行都不用動。
+    // ⚠️ 唯一的行為差異:道具鍵在「提示那一格已經不是它」時重掃,取的是**第一個**命中的格子,
+    //    而原建構子沒有 break、取的是**最後一個**。道具沒有移動時走的是提示快路徑、結果與原本
+    //    完全相同,只有道具真的被搬走之後、而且同一件道具同時存在多格時才可能挑到不同的一格。
     public unsafe class InventoryItemWrapper : IWrapper
     {
-        private readonly InventoryType[] playerInv = [
+        // 原本是每個包裝物件各配一份的實體欄位;內容是常數,改成靜態的省掉每次建構的陣列配置。
+        private static readonly InventoryType[] PlayerInventories = [
             InventoryType.Inventory1,
             InventoryType.Inventory2,
             InventoryType.Inventory3,
@@ -172,39 +233,196 @@ public unsafe class InventoryModule : LuaModuleBase
             InventoryType.ArmoryRings
             ];
 
-        private InventoryItem* Item { get; set; }
-        public InventoryItemWrapper(InventoryType container, int slot) => Item = InventoryManager.Instance()->GetInventoryContainer(container)->GetInventorySlot(slot);
-        public InventoryItemWrapper(InventoryContainer* container, int slot) => Item = container->GetInventorySlot(slot);
-        public InventoryItemWrapper(InventoryItem* item) => Item = item;
+        /// <summary>槽位鍵的容器。<see cref="InventoryType.Invalid"/>＝這個包裝物件沒有可用的鍵。</summary>
+        private readonly InventoryType _container;
+
+        /// <summary>槽位鍵的格號;道具鍵時只是「上次看到它在這一格」的提示。-1＝不知道。</summary>
+        private readonly int _slot;
+
+        /// <summary>道具鍵。0＝這個包裝物件認的是槽位而不是道具。</summary>
+        private readonly uint _itemId;
+
+        public InventoryItemWrapper(InventoryType container, int slot)
+        {
+            _container = container;
+            _slot = slot;
+        }
+
+        public InventoryItemWrapper(InventoryContainer* container, int slot)
+        {
+            // 建構當下讀一次容器型別、把它換成鍵,之後再也不碰這個指標。
+            (_container, _slot) = container == null ? (InventoryType.Invalid, -1) : (container->Type, slot);
+        }
+
+        public InventoryItemWrapper(InventoryItem* item) => (_container, _slot) = LocateByAddress(item);
+
         public InventoryItemWrapper(uint itemId)
         {
-            foreach (var inv in playerInv)
+            _itemId = itemId;
+            (_container, _slot) = FindByItemId(itemId);
+        }
+
+        /// <summary>
+        /// 從裸指標把道具定位成 (容器, 格號)。
+        /// 🔴 刻意不讀 item->Container / item->Slot,也不呼叫 GetInventoryType() / GetSlot():
+        /// 前者是「這個結構自己說它在哪」（空格子的欄位有沒有維護沒有被驗證過），後者是虛擬函式 ——
+        /// 位址若不是真的 InventoryItem 就等於透過假 vtable 跳轉,必定崩潰而且攔不到。
+        /// ⇒ 只做指標範圍比較（純比較、完全不解參考,對任何輸入都安全）,確認它真的落在某個容器的
+        /// Items 陣列裡,再把座標算出來。定不出來就是一個解析不到的包裝物件（所有成員回中性值）。
+        /// </summary>
+        private static (InventoryType Container, int Slot) LocateByAddress(InventoryItem* item)
+        {
+            if (item == null) return (InventoryType.Invalid, -1);
+
+            var manager = InventoryManager.Instance();
+            foreach (var type in Enum.GetValues<InventoryType>())
             {
-                var cont = InventoryManager.Instance()->GetInventoryContainer(inv);
-                for (var i = 0; i < cont->Size; ++i)
-                    if (cont->GetInventorySlot(i)->ItemId == itemId)
-                        Item = cont->GetInventorySlot(i);
+                if (type == InventoryType.Invalid) continue;
+
+                var container = manager->GetInventoryContainer(type);
+                if (container == null) continue;
+
+                var items = container->Items;
+                var size = container->Size;
+                if (items == null || size <= 0) continue;
+                if (item < items || item >= items + size) continue;
+
+                return (type, (int)(item - items));
+            }
+
+            return (InventoryType.Invalid, -1);
+        }
+
+        /// <summary>在玩家自己的容器裡找這件道具,回它現在的 (容器, 格號);找不到回 (Invalid, -1)。</summary>
+        private static (InventoryType Container, int Slot) FindByItemId(uint itemId)
+        {
+            // itemId 0 沒有意義（那是「空格子」的值,會命中任何一個空位）。原本的建構子會把最後一個
+            // 空格當成結果,而空格的每個欄位都是 0 —— 與這裡回「解析不到」時的中性值完全一樣。
+            if (itemId == 0) return (InventoryType.Invalid, -1);
+
+            var manager = InventoryManager.Instance();
+            foreach (var inv in PlayerInventories)
+            {
+                var container = manager->GetInventoryContainer(inv);
+                if (container == null) continue;
+
+                var size = container->Size;
+                for (var i = 0; i < size; i++)
+                {
+                    var slot = container->GetInventorySlot(i);
+                    if (slot != null && slot->ItemId == itemId)
+                        return (inv, i);
+                }
+            }
+
+            return (InventoryType.Invalid, -1);
+        }
+
+        /// <summary>
+        /// 解析出這一格的原生指標,並回報它現在真正的位置。
+        /// 呼叫端一律先把回值存進區域變數,不要在同一個成員裡解析兩次（兩次之間狀態可能已經不同）。
+        /// </summary>
+        private InventoryItem* Resolve(out InventoryType container, out int slot)
+        {
+            container = _container;
+            slot = _slot;
+
+            var hinted = GetSlot(_container, _slot);
+
+            // 槽位鍵:那一格是什麼就是什麼（空的也照回,與遊戲對空格回歸零結構的行為一致）。
+            if (_itemId == 0) return hinted;
+
+            // 道具鍵:先驗提示的那一格還是不是同一件道具（絕大多數情況道具根本沒動,這是 O(1) 快路徑）。
+            if (hinted != null && hinted->ItemId == _itemId) return hinted;
+
+            // 提示對不上 ⇒ 道具被搬走了,重掃一次。
+            (container, slot) = FindByItemId(_itemId);
+            return GetSlot(container, slot);
+        }
+
+        /// <summary>每次讀取都重新解析的原生指標。⚠️ 不要連續寫兩個 `Item->`,先存區域變數。</summary>
+        private InventoryItem* Item => Resolve(out _, out _);
+
+        private static InventoryItem* GetSlot(InventoryType container, int slot)
+        {
+            if (container == InventoryType.Invalid || slot < 0) return null;
+
+            var c = InventoryManager.Instance()->GetInventoryContainer(container);
+            if (c == null) return null;
+
+            // 🔴 越界的格號不要送進 GetInventorySlot():那是虛擬函式,它做不做邊界檢查沒有被驗證過,
+            // 而 Lua 面的索引子（container[index]）讓使用者可以傳任何數字進來。
+            if (slot >= c->Size) return null;
+
+            return c->GetInventorySlot(slot);
+        }
+
+        /// <summary>這個包裝物件現在解析得到真的道具格嗎。</summary>
+        [LuaDocs(description: "Whether this wrapper still resolves to a real inventory slot right now. When it is false every other member returns the same neutral value an empty slot would (0 / false / nil).")]
+        [Changelog(ChangelogAttribute.Unreleased)]
+        public bool Exists => Item != null;
+
+        [LuaDocs] public uint ItemId { get { var item = Item; return item == null ? 0u : item->ItemId; } }
+        [LuaDocs] public uint BaseItemId { get { var item = Item; return item == null ? 0u : item->GetBaseItemId(); } }
+        [LuaDocs] public int Count { get { var item = Item; return item == null ? 0 : item->Quantity; } }
+        [LuaDocs] public ushort SpiritbondOrCollectability { get { var item = Item; return item == null ? (ushort)0 : item->SpiritbondOrCollectability; } }
+        [LuaDocs] public ushort Condition { get { var item = Item; return item == null ? (ushort)0 : item->Condition; } }
+        [LuaDocs] public uint GlamourId { get { var item = Item; return item == null ? 0u : item->GlamourId; } }
+        [LuaDocs] public bool IsHighQuality { get { var item = Item; return item != null && item->IsHighQuality(); } }
+
+        // 原本寫成 `Item->GetLinkedItem() is not null ? new(Item->GetLinkedItem()) : null`：解析三次
+        // （其中兩次是 Item 這個當時會凍結的指標）,而且把回來的裸指標直接包起來。行為維持不變:
+        //   · GetLinkedItem() 回 null ⇒ 回 null；
+        //   · 非符號連結 ⇒ 它回的是這件道具自己,所以回這個包裝物件本身（鍵完全不會遺失）；
+        //   · 符號連結 ⇒ 目標的容器與格號本來就寫在結構裡,直接拿來當鍵。
+        // ⚠️ CS 對 GetLinkedItem() 的說明是散文註解、沒有在台服驗證過,所以用結構欄位組出來的鍵
+        //    要先驗它解析回同一個位址;對不上就退回純指標範圍定位。
+        [LuaDocs]
+        public InventoryItemWrapper? LinkedItem
+        {
+            get
+            {
+                var item = Item;
+                if (item == null) return null;
+
+                var linked = item->GetLinkedItem();
+                if (linked == null) return null;
+                if (!item->IsSymbolic) return this;
+
+                var keyed = new InventoryItemWrapper((InventoryType)item->LinkedInventoryType, item->LinkedItemSlot);
+                return keyed.Item == linked ? keyed : new InventoryItemWrapper(linked);
             }
         }
 
-        [LuaDocs] public uint ItemId => Item->ItemId;
-        [LuaDocs] public uint BaseItemId => Item->GetBaseItemId();
-        [LuaDocs] public int Count => Item->Quantity;
-        [LuaDocs] public ushort SpiritbondOrCollectability => Item->SpiritbondOrCollectability;
-        [LuaDocs] public ushort Condition => Item->Condition;
-        [LuaDocs] public uint GlamourId => Item->GlamourId;
-        [LuaDocs] public bool IsHighQuality => Item->IsHighQuality();
-        [LuaDocs] public InventoryItemWrapper? LinkedItem => Item->GetLinkedItem() is not null ? new(Item->GetLinkedItem()) : null;
+        // 解析得到就回它現在真正的位置（道具鍵的包裝物件在道具被搬走之後會回新位置）;
+        // 解析不到就回這個包裝物件當初認的那一格,道具鍵完全找不到時是 Invalid / -1。
+        [LuaDocs] public InventoryType Container { get { Resolve(out var container, out _); return container; } }
+        [LuaDocs] public int Slot { get { Resolve(out _, out var slot); return slot; } }
 
-        [LuaDocs] public InventoryType Container => Item->Container;
-        [LuaDocs] public int Slot => Item->Slot;
-
-        [LuaDocs] public void Use() => Game.UseItem(ItemId, IsHighQuality);
+        [LuaDocs]
+        public void Use()
+        {
+            // 動作型 ⇒ 記一行錯誤。原本解析不到時會拿 ItemId 的中性值 0 去呼叫 UseItem。
+            var item = Item;
+            if (item == null)
+            {
+                FrameworkLogger.Error("Cannot use item: this wrapper no longer resolves to an inventory slot.");
+                return;
+            }
+            Game.UseItem(item->ItemId, item->IsHighQuality());
+        }
 
         [LuaDocs(description: "Opens the right-click context menu for this inventory slot, as if the item was right-clicked.")]
         public void OpenContextMenu()
         {
-            var addonName = $"InventoryGrid{(int)Container}E";
+            // 動作型 ⇒ 解析不到就記一行錯誤。原本 Container / Slot 各自解參考一次 Item。
+            if (Resolve(out var container, out var slot) == null)
+            {
+                FrameworkLogger.Error("Cannot open the context menu: this wrapper no longer resolves to an inventory slot.");
+                return;
+            }
+
+            var addonName = $"InventoryGrid{(int)container}E";
             var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(addonName).Address;
             var addonId = addon != null ? addon->Id : (uint)0;
 
@@ -219,14 +437,23 @@ public unsafe class InventoryModule : LuaModuleBase
                 FrameworkLogger.Error("Inventory context agent is unavailable (not logged in?)");
                 return;
             }
-            agent->OpenForItemSlot(Container, Slot, 0, addonId);
+            agent->OpenForItemSlot(container, slot, 0, addonId);
         }
 
         [LuaDocs]
         [Changelog("12.8")]
         public void Desynth()
         {
-            if (GetRow<Sheets.Item>(ItemId)?.Desynth == 0)
+            // 動作型 ⇒ 解析不到就記一行錯誤。⚠️ 順序必須是「先解析道具、再查表」:原本先讀 ItemId
+            // 就已經解參考過 Item 了,而 SalvageItem 收的又是同一個指標,兩者必須是同一次解析的結果。
+            var item = Item;
+            if (item == null)
+            {
+                FrameworkLogger.Error("Cannot desynthesise: this wrapper no longer resolves to an inventory slot.");
+                return;
+            }
+
+            if (GetRow<Sheets.Item>(item->ItemId)?.Desynth == 0)
                 return;
 
             // 同上:AgentSalvage.Instance() 是 C 類,合法回 null。原本在同一支方法裡裸呼叫兩次,
@@ -238,7 +465,7 @@ public unsafe class InventoryModule : LuaModuleBase
                 return;
             }
 
-            agent->SalvageItem(Item);
+            agent->SalvageItem(item);
             var retval = new AtkValue();
             Span<AtkValue> param = [
                 new AtkValue { Type = ValueType.Int, Int = 0 },
@@ -262,14 +489,23 @@ public unsafe class InventoryModule : LuaModuleBase
         [Changelog("12.51")]
         public void MoveItemSlot(InventoryType destinationContainer)
         {
-            if (GetFirstEmptySlot(destinationContainer) is not { } destinationSlot)
+            // 動作型 ⇒ 解析不到就記一行錯誤。⚠️ 來源的容器與格號一定要取自同一次解析:分兩次讀
+            // Container 與 Slot,道具剛好在兩次之間被搬走就會送出一組不存在的座標。
+            var item = Resolve(out var container, out var slot);
+            if (item == null)
             {
-                FrameworkLogger.Warning(
-                    $"MoveItemSlot: {destinationContainer} has no empty slot, item {ItemId} in {Container}#{Slot} was not moved.");
+                FrameworkLogger.Error("MoveItemSlot: this wrapper no longer resolves to an inventory slot, nothing was moved.");
                 return;
             }
 
-            InventoryManager.Instance()->MoveItemSlot(Container, (ushort)Slot, destinationContainer, destinationSlot, a6: true);
+            if (GetFirstEmptySlot(destinationContainer) is not { } destinationSlot)
+            {
+                FrameworkLogger.Warning(
+                    $"MoveItemSlot: {destinationContainer} has no empty slot, item {item->ItemId} in {container}#{slot} was not moved.");
+                return;
+            }
+
+            InventoryManager.Instance()->MoveItemSlot(container, (ushort)slot, destinationContainer, destinationSlot, a6: true);
         }
     }
 
