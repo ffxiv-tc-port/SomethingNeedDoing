@@ -63,8 +63,23 @@ public class EquipItemCommand(string text, uint itemId) : MacroCommandBase(text)
         var agentId = IsArmoryInventory(pos.Value.inv) ?
             AgentId.ArmouryBoard : AgentId.Inventory;
 
-        var addonId = AgentModule.Instance()->GetAgentByInternalId(agentId)->GetAddonId();
+        // 三層都合法會回 null,而且每一層都要分開判:
+        //  - AgentModule.Instance() 手寫成 `uiModule == null ? null : uiModule->GetAgentModule()`
+        //  - GetAgentByInternalId() 對尚未建立的代理人回 null
+        //  - AgentInventoryContext.Instance() 是 [Agent] 產生器版(同樣帶 `== null ? null :`)
+        // 任一層解參考 null 都是 AccessViolation,而 AVE 在 .NET Core 是 corrupted-state
+        // exception,try/catch(包含巨集引擎自己的例外處理)完全攔不到。
+        // 照同檔上方「找不到道具」的既有慣例:記一行錯誤後放棄這次 /equip,不擲例外。
+        var agentModule = AgentModule.Instance();
+        var inventoryAgent = agentModule is null ? null : agentModule->GetAgentByInternalId(agentId);
         var ctx = AgentInventoryContext.Instance();
+        if (inventoryAgent is null || ctx is null)
+        {
+            FrameworkLogger.Error($"Cannot equip item #{itemId}: inventory agents are unavailable (not logged in?)");
+            return;
+        }
+
+        var addonId = inventoryAgent->GetAddonId();
         ctx->OpenForItemSlot(pos.Value.inv, pos.Value.slot, 0, addonId);
 
         var contextMenu = (AtkUnitBase*)Svc.GameGui.GetAddonByName("ContextMenu").Address;

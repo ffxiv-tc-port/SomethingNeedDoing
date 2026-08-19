@@ -105,10 +105,27 @@ public unsafe class AddonWrapper(string name) : IWrapper
     {
         var addon = Addon;
         if (addon == null) return; // 視窗不在就這次不做事;ReceiveEvent 對空指標是攔不到的 AVE
+
+        // 🔴 毒指標交接:原本寫的是 `Target = &AtkStage.Instance()->AtkEventTarget`。
+        // **取欄位位址不會解參考** —— AtkStage.Instance() 回 null 時這一行不會當場崩,
+        // 它算出的是 `null + offsetof(AtkEventTarget)`,一個長得像小整數的假指標,
+        // 然後被原封不動交給遊戲的 ReceiveEvent。崩潰發生在遊戲碼解參考那個假指標的時候,
+        // 是 AccessViolation;AVE 在 .NET Core 是 corrupted-state exception,try/catch 攔不到。
+        // ⇒ 失敗必須在送出事件之前攔下,不能靠例外處理善後。
+        // AtkStage.Instance() 宣告成 [StaticAddress(..., isPointer: true)],回的是靜態位址裡
+        // 存放的指標值,產生器只在特徵碼失配時擲例外,對回傳值不判空。
+        // 樣板照 ECommons 2465b28 的 AddonMasterBase.TryCreateAtkEvent:取不到就完全不送事件。
+        var stage = AtkStage.Instance();
+        if (stage == null)
+        {
+            FrameworkLogger.Error("AtkStage is unavailable; refusing to send a DragDropClick with an invalid event target.");
+            return;
+        }
+
         var evt = new AtkEvent
         {
             Listener = (AtkEventListener*)addon,
-            Target = &AtkStage.Instance()->AtkEventTarget,
+            Target = &stage->AtkEventTarget,
             Param = (uint)which,
         };
         var data = new AtkEventDataBuilder().Write<byte>(6, 1).Build(); // offset 6 = AtkMouseData.ButtonId, 1 = right click

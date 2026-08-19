@@ -17,7 +17,17 @@ public static class FirstTimeWarningModal
 
     public static unsafe void DrawModal()
     {
-        if (C.AcknowledgedLegacyWarning || !AgentLobby.Instance()->IsLoggedIntoZone) return;
+        if (C.AcknowledgedLegacyWarning) return;
+
+        // AgentLobby.Instance() 是 C 類([Agent] 產生器,實作逐字帶
+        // `agentModule == null ? null : ...`)—— 遊戲剛啟動、UIModule 尚未建立時合法回 null,
+        // 而這支是每幀跑的繪製路徑,正好會在「還沒登入」的時段被呼叫。
+        // 解參考 null 是 AccessViolation,corrupted-state exception,try/catch 攔不到。
+        // 取不到代理人 ⇒ 當作「還沒進到區域」,這幀不畫(與 IsLoggedIntoZone 為 false 同義,
+        // 下一幀會再試,警告視窗不會因此被永久跳過)。
+        var lobby = AgentLobby.Instance();
+        if (lobby == null || !lobby->IsLoggedIntoZone) return;
+
         var isOpen = !C.AcknowledgedLegacyWarning;
 
         ImGui.OpenPopup($"FirstTimeWarningPopup##{nameof(FirstTimeWarningModal)}");

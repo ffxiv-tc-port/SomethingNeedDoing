@@ -207,7 +207,19 @@ public unsafe class InventoryModule : LuaModuleBase
             var addonName = $"InventoryGrid{(int)Container}E";
             var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(addonName).Address;
             var addonId = addon != null ? addon->Id : (uint)0;
-            AgentInventoryContext.Instance()->OpenForItemSlot(Container, Slot, 0, addonId);
+
+            // AgentInventoryContext.Instance() 是 C 類([Agent] 產生器,實作逐字帶
+            // `agentModule == null ? null : ...`),未登入／UIModule 尚未建立時合法回 null。
+            // 解參考它是 AccessViolation,corrupted-state exception,try/catch 攔不到。
+            // 動作型方法 ⇒ 照 InstancesModule 的既有慣例記一行錯誤再返回,不要安靜失敗
+            // (安靜失敗會讓巨集作者以為選單已經開了)。
+            var agent = AgentInventoryContext.Instance();
+            if (agent == null)
+            {
+                FrameworkLogger.Error("Inventory context agent is unavailable (not logged in?)");
+                return;
+            }
+            agent->OpenForItemSlot(Container, Slot, 0, addonId);
         }
 
         [LuaDocs]
@@ -217,13 +229,22 @@ public unsafe class InventoryModule : LuaModuleBase
             if (GetRow<Sheets.Item>(ItemId)?.Desynth == 0)
                 return;
 
-            AgentSalvage.Instance()->SalvageItem(Item);
+            // 同上:AgentSalvage.Instance() 是 C 類,合法回 null。原本在同一支方法裡裸呼叫兩次,
+            // 改成取一次本地指標、判空後重用(不跨幀保存)。
+            var agent = AgentSalvage.Instance();
+            if (agent == null)
+            {
+                FrameworkLogger.Error("Desynthesis agent is unavailable (not logged in?)");
+                return;
+            }
+
+            agent->SalvageItem(Item);
             var retval = new AtkValue();
             Span<AtkValue> param = [
                 new AtkValue { Type = ValueType.Int, Int = 0 },
                 new AtkValue { Type = ValueType.Bool, Byte = 1 }
             ];
-            AgentSalvage.Instance()->AgentInterface.ReceiveEvent(&retval, param.GetPointer(0), 2, 1);
+            agent->AgentInterface.ReceiveEvent(&retval, param.GetPointer(0), 2, 1);
         }
 
         // 🔴 第 5 個引數 a6 是「這次搬移要不要送給伺服器」的總開關,不是無關緊要的 unknown。
