@@ -86,9 +86,14 @@ public unsafe class AddonModule : LuaModuleBase
             return names;
         }
 
-        // 📌 Count 是 ushort 而 Entries 是 FixedSizeArray256(產生器出來的是 Span),
-        //    萬一 Count > 256 會是 IndexOutOfRangeException 而不是 AVE,所以這裡不另外夾。
-        for (var i = 0; i < manager->AllLoadedUnitsList.Count; i++)
+        // 📌 Count 是**遊戲寫入**的 ushort,而 Entries 是 FixedSizeArray256(產生器出來的是 Span)——
+        //    兩者之間沒有任何結構保證。Count > 256 時的失敗形式是 IndexOutOfRangeException
+        //    而不是 AVE(Span 的索引有邊界檢查),但那仍然會把這個使用者呼叫的函式整個炸掉,
+        //    所以夾到容量內:越界時安靜少讀,並記一行 Information 讓使用者回報得出來。
+        var unitCount = Math.Min((int)manager->AllLoadedUnitsList.Count, manager->AllLoadedUnitsList.Entries.Length);
+        if (unitCount < manager->AllLoadedUnitsList.Count)
+            FrameworkLogger.Info($"AllLoadedUnitsList.Count={manager->AllLoadedUnitsList.Count} exceeds Entries capacity {manager->AllLoadedUnitsList.Entries.Length}; clamped");
+        for (var i = 0; i < unitCount; i++)
         {
             var unit = manager->AllLoadedUnitsList.Entries[i].Value;
             if (unit != null && unit->IsVisible)
