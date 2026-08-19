@@ -34,20 +34,45 @@ public unsafe class PlayerModule : LuaModuleBase
 
     [LuaFunction] public JobWrapper Job => new(Player.JobId);
     [LuaFunction] public JobWrapper GetJob(uint classJobId) => new(classJobId);
-    [LuaFunction][Changelog("12.21")] public GearsetWrapper Gearset => new(RaptureGearsetModule.Instance()->CurrentGearsetIndex);
+    [LuaFunction][Changelog("12.21")] public GearsetWrapper Gearset { get { var module = RaptureGearsetModule.Instance(); return new(module == null ? GearsetWrapper.NoGearset : module->CurrentGearsetIndex); } }
     [LuaFunction][Changelog("12.21")] public GearsetWrapper GetGearset(int id) => new(id);
-    [LuaFunction][Changelog("12.21")] public List<GearsetWrapper> Gearsets => [.. RaptureGearsetModule.Instance()->Entries.ToArray().Select((g, i) => new GearsetWrapper(i))];
+    [LuaFunction][Changelog("12.21")] public List<GearsetWrapper> Gearsets { get { var module = RaptureGearsetModule.Instance(); return module == null ? [] : [.. module->Entries.ToArray().Select((g, i) => new GearsetWrapper(i))]; } }
     public class GearsetWrapper(int id) : IWrapper
     {
-        [LuaDocs][Changelog("12.21")] public bool IsValid => RaptureGearsetModule.Instance()->IsValidGearset(id);
-        [LuaDocs][Changelog("12.21")] public byte ClassJob => RaptureGearsetModule.Instance()->GetGearset(id)->ClassJob;
-        [LuaDocs][Changelog("12.21")] public byte GlamourSetLink => RaptureGearsetModule.Instance()->GetGearset(id)->GlamourSetLink;
-        [LuaDocs][Changelog("12.21")] public short ItemLevel => RaptureGearsetModule.Instance()->GetGearset(id)->ItemLevel;
-        [LuaDocs][Changelog("12.21")] public byte BannerIndex => RaptureGearsetModule.Instance()->GetGearset(id)->BannerIndex;
-        [LuaDocs][Changelog("12.21")] public string Name => RaptureGearsetModule.Instance()->GetGearset(id)->NameString;
-        [LuaDocs][Changelog("12.21")] public List<InventoryItemWrapper> Items => [.. RaptureGearsetModule.Instance()->GetGearset(id)->Items.ToArray().Select(i => new InventoryItemWrapper(i.ItemId))];
-        [LuaDocs][Changelog("12.21")] public void Equip() => RaptureGearsetModule.Instance()->EquipGearset(id);
-        [LuaDocs][Changelog("12.21")] public void Update() => RaptureGearsetModule.Instance()->UpdateGearset(id);
+        /// <summary>取不到裝備組時用的哨兵索引：所有存取都會走 null 分支。</summary>
+        internal const int NoGearset = -1;
+
+        /// <summary>
+        /// 裝備組的數量上限，取自 <c>RaptureGearsetModule._entries</c> 的 <c>FixedSizeArray100</c>。
+        /// Lua 這一側的 id 是巨集作者自己填的，越界時不能把它交給原生函式。
+        /// </summary>
+        private const int MaxGearsets = 100;
+
+        /// <summary>模組指標不跨呼叫保存：每次存取重取，取不到就回 null 讓上層走保守分支。</summary>
+        private static RaptureGearsetModule* Module => RaptureGearsetModule.Instance();
+
+        /// <summary>條目指標同樣每次重取。模組為 null、id 越界、或原生查詢回 null 時一律回 null。</summary>
+        private RaptureGearsetModule.GearsetEntry* Entry
+        {
+            get
+            {
+                var module = Module;
+                return module == null || id is < 0 or >= MaxGearsets ? null : module->GetGearset(id);
+            }
+        }
+
+        /// <summary>這個包裝物件目前指得到真的裝備組嗎（未登入／索引越界時為 false）。</summary>
+        [LuaDocs] public bool Exists => Entry != null;
+
+        [LuaDocs][Changelog("12.21")] public bool IsValid { get { var module = Module; return module != null && id is >= 0 and < MaxGearsets && module->IsValidGearset(id); } }
+        [LuaDocs][Changelog("12.21")] public byte ClassJob { get { var entry = Entry; return entry == null ? (byte)0 : entry->ClassJob; } }
+        [LuaDocs][Changelog("12.21")] public byte GlamourSetLink { get { var entry = Entry; return entry == null ? (byte)0 : entry->GlamourSetLink; } }
+        [LuaDocs][Changelog("12.21")] public short ItemLevel { get { var entry = Entry; return entry == null ? (short)0 : entry->ItemLevel; } }
+        [LuaDocs][Changelog("12.21")] public byte BannerIndex { get { var entry = Entry; return entry == null ? (byte)0 : entry->BannerIndex; } }
+        [LuaDocs][Changelog("12.21")] public string Name { get { var entry = Entry; return entry == null ? string.Empty : entry->NameString; } }
+        [LuaDocs][Changelog("12.21")] public List<InventoryItemWrapper> Items { get { var entry = Entry; return entry == null ? [] : [.. entry->Items.ToArray().Select(i => new InventoryItemWrapper(i.ItemId))]; } }
+        [LuaDocs][Changelog("12.21")] public void Equip() { var module = Module; if (module != null && id is >= 0 and < MaxGearsets) module->EquipGearset(id); }
+        [LuaDocs][Changelog("12.21")] public void Update() { var module = Module; if (module != null && id is >= 0 and < MaxGearsets) module->UpdateGearset(id); }
     }
 
     [LuaFunction] public bool IsMoving => Player.IsMoving;
