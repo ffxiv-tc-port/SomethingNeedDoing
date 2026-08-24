@@ -1,4 +1,5 @@
-﻿using Dalamud.Interface.Colors;
+﻿using Dalamud.Game.Text;
+using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
 using ECommons.LanguageHelpers;
@@ -7,6 +8,51 @@ using SomethingNeedDoing.Gui.Modals;
 namespace SomethingNeedDoing.Gui.Tabs;
 public static class SettingsTab
 {
+    // 有官方或既有繁中翻譯依據的聊天頻道才收錄；沒收錄的成員(例如 SystemError、CrossParty)
+    // 交給 ECommons EnumCombo 的內建 fallback 顯示原始英文成員名,避免猜錯造成誤導。
+    private static readonly Dictionary<XivChatType, string> ChatTypeNames = new()
+    {
+        [XivChatType.None] = "None".Loc(),
+        [XivChatType.Debug] = "Debug".Loc(),
+        [XivChatType.Urgent] = "Urgent".Loc(),
+        [XivChatType.Notice] = "Notice".Loc(),
+        [XivChatType.Say] = "Say".Loc(),
+        [XivChatType.Shout] = "Shout".Loc(),
+        [XivChatType.TellOutgoing] = "Tell (Outgoing)".Loc(),
+        [XivChatType.TellIncoming] = "Tell (Incoming)".Loc(),
+        [XivChatType.Party] = "Party".Loc(),
+        [XivChatType.Alliance] = "Alliance".Loc(),
+        [XivChatType.Ls1] = "Linkshell 1".Loc(),
+        [XivChatType.Ls2] = "Linkshell 2".Loc(),
+        [XivChatType.Ls3] = "Linkshell 3".Loc(),
+        [XivChatType.Ls4] = "Linkshell 4".Loc(),
+        [XivChatType.Ls5] = "Linkshell 5".Loc(),
+        [XivChatType.Ls6] = "Linkshell 6".Loc(),
+        [XivChatType.Ls7] = "Linkshell 7".Loc(),
+        [XivChatType.Ls8] = "Linkshell 8".Loc(),
+        [XivChatType.FreeCompany] = "Free Company".Loc(),
+        [XivChatType.NoviceNetwork] = "Novice Network".Loc(),
+        [XivChatType.CustomEmote] = "Custom Emotes".Loc(),
+        [XivChatType.StandardEmote] = "Standard Emotes".Loc(),
+        [XivChatType.Yell] = "Yell".Loc(),
+        [XivChatType.PvPTeam] = "PvP Team".Loc(),
+        [XivChatType.CrossLinkShell1] = "Crossworld Linkshell 1".Loc(),
+        [XivChatType.CrossLinkShell2] = "Crossworld Linkshell 2".Loc(),
+        [XivChatType.CrossLinkShell3] = "Crossworld Linkshell 3".Loc(),
+        [XivChatType.CrossLinkShell4] = "Crossworld Linkshell 4".Loc(),
+        [XivChatType.CrossLinkShell5] = "Crossworld Linkshell 5".Loc(),
+        [XivChatType.CrossLinkShell6] = "Crossworld Linkshell 6".Loc(),
+        [XivChatType.CrossLinkShell7] = "Crossworld Linkshell 7".Loc(),
+        [XivChatType.CrossLinkShell8] = "Crossworld Linkshell 8".Loc(),
+        [XivChatType.Echo] = "Echo".Loc(),
+        [XivChatType.SystemMessage] = "System Message".Loc(),
+        [XivChatType.GatheringSystemMessage] = "Gathering System Message".Loc(),
+        [XivChatType.ErrorMessage] = "Error Message".Loc(),
+        [XivChatType.NPCDialogue] = "NPC Dialogue".Loc(),
+        [XivChatType.NPCDialogueAnnouncements] = "NPC Dialogue (Announcements)".Loc(),
+        [XivChatType.RetainerSale] = "Retainer Sale".Loc(),
+    };
+
     public static void DrawTab()
     {
         using var _ = ImRaii.Child("SettingsTab", Vector2.Create(-1), false);
@@ -16,14 +62,14 @@ public static class SettingsTab
             var chatChannel = C.ChatType;
             // "###ChatType" keeps the ImGui id (and ECommons' EnumComboSearch dictionary
             // key) language-independent; only the visible label is translated.
-            if (ImGuiEx.EnumCombo("ChatType".Loc() + "###ChatType", ref chatChannel))
+            if (ImGuiEx.EnumCombo("ChatType".Loc() + "###ChatType", ref chatChannel, names: ChatTypeNames))
             {
                 C.ChatType = chatChannel;
                 C.Save();
             }
 
             var errorChannel = C.ErrorChatType;
-            if (ImGuiEx.EnumCombo("ErrorChatType".Loc() + "###ErrorChatType", ref errorChannel))
+            if (ImGuiEx.EnumCombo("ErrorChatType".Loc() + "###ErrorChatType", ref errorChannel, names: ChatTypeNames))
             {
                 C.ErrorChatType = errorChannel;
                 C.Save();
