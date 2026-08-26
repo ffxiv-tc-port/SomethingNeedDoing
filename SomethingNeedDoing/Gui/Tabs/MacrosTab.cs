@@ -3,6 +3,7 @@ using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using SomethingNeedDoing.Gui.Modals;
 using SomethingNeedDoing.Managers;
@@ -62,7 +63,7 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
     {
         ImGui.SetNextItemWidth(-1);
         var searchText = _state.SearchText;
-        if (ImGui.InputTextWithHint("##Search", "Search Folders & Macros...", ref searchText, 100))
+        if (ImGui.InputTextWithHint("##Search", "Search Folders & Macros...".Loc(), ref searchText, 100))
             _state.SearchText = searchText;
         ImGui.Separator();
 
@@ -88,24 +89,25 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
     private void DrawMacroTreeHeader()
     {
         using var group = ImRaii.Group();
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "FOLDERS");
+        var foldersLabel = "FOLDERS".Loc();
+        ImGui.TextColored(ImGuiColors.DalamudViolet, foldersLabel);
 
-        var textWidth = ImGui.CalcTextSize("FOLDERS").X;
+        var textWidth = ImGui.CalcTextSize(foldersLabel).X;
         ImGui.SameLine(textWidth + 15);
 
         if (ImGuiUtils.IconButton(_state.IsFolderSectionCollapsed ? FontAwesomeIcon.AngleDown : FontAwesomeIcon.AngleUp,
-            _state.IsFolderSectionCollapsed ? "Expand folder tree" : "Collapse folder tree"))
+            _state.IsFolderSectionCollapsed ? "Expand folder tree".Loc() : "Collapse folder tree".Loc()))
             _state.IsFolderSectionCollapsed ^= true;
 
         ImGui.SameLine(0, 5);
         using var style = ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(4, 4));
 
-        if (ImGuiUtils.IconButton(FontAwesomeIcon.FileAlt, "Create a new macro"))
+        if (ImGuiUtils.IconButton(FontAwesomeIcon.FileAlt, "Create a new macro".Loc()))
             _createMacroModal.Open();
 
         ImGui.SameLine(0, 5);
 
-        if (ImGuiUtils.IconButton(FontAwesomeIcon.FolderPlus, "Create a new folder"))
+        if (ImGuiUtils.IconButton(FontAwesomeIcon.FolderPlus, "Create a new folder".Loc()))
             CreateFolderModal.Open();
     }
 
@@ -192,7 +194,7 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
             var macros = C.GetMacrosInFolder(folderPath).ToList();
             if (macros.Count == 0)
             {
-                ImGui.TextColored(ImGuiColors.DalamudGrey, "No macros in this folder");
+                ImGui.TextColored(ImGuiColors.DalamudGrey, "No macros in this folder".Loc());
                 return;
             }
 
@@ -211,13 +213,13 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
         using var popup = ImRaii.ContextPopupItem($"##FolderContextMenu_{folderPath}");
         if (!popup) return;
 
-        ImGui.TextColored(ImGuiColors.DalamudViolet, $"Folder: {folderPath}");
+        ImGui.TextColored(ImGuiColors.DalamudViolet, "Folder: ??".Loc(folderPath));
         ImGui.Separator();
 
-        if (ImGui.MenuItem("Rename Folder"))
+        if (ImGui.MenuItem("Rename Folder".Loc()))
             RenameFolderModal.Open(folderPath);
 
-        if (ImGui.MenuItem("Delete Folder"))
+        if (ImGui.MenuItem("Delete Folder".Loc()))
         {
             try
             {
@@ -228,12 +230,12 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
                 FrameworkLogger.Error(ex, "Error deleting folder");
             }
         }
-        ImGuiEx.Tooltip("Delete this folder and move all macros to root folder");
+        ImGuiEx.Tooltip("Delete this folder and move all macros to root folder".Loc());
     }
 
     private void DrawSearchResults()
     {
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "SEARCH RESULTS");
+        ImGui.TextColored(ImGuiColors.DalamudViolet, "SEARCH RESULTS".Loc());
 
         var allFolders = C.GetFolderPaths().Where(f => !string.IsNullOrEmpty(f));
         var foundAnyFolders = false;
@@ -257,7 +259,7 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
         if (foundAnyFolders)
         {
             ImGui.Separator();
-            ImGui.TextColored(ImGuiColors.DalamudViolet, "MATCHING MACROS");
+            ImGui.TextColored(ImGuiColors.DalamudViolet, "MATCHING MACROS".Loc());
         }
 
         var foundAnyMacros = false;
@@ -268,7 +270,7 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
         }
 
         if (!foundAnyFolders && !foundAnyMacros)
-            ImGui.TextColored(ImGuiColors.DalamudGrey, "No matching folders or macros");
+            ImGui.TextColored(ImGuiColors.DalamudGrey, "No matching folders or macros".Loc());
     }
 
     private void DrawMacroTreeNode(ConfigMacro macro, bool showFolder)
@@ -280,7 +282,7 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
         ImGui.SameLine();
 
         var displayName = showFolder ? $"{macro.Name} [{macro.FolderPath}]" : macro.Name;
-        displayName += macro.Type == MacroType.Lua ? " (Lua)" : "";
+        displayName += macro.Type == MacroType.Lua ? " " + "(Lua)".Loc() : "";
 
         var isSelected = macro.Id == _state.SelectedMacroId;
         using var color = ImRaii.PushColor(ImGuiCol.Header, ImGuiColors.ParsedPurple, isSelected);
@@ -302,22 +304,22 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
         ImGui.TextColored(ImGuiColors.DalamudViolet, macro.Name);
         ImGui.Separator();
 
-        if (ImGuiUtils.IconMenuItem(FontAwesomeHelper.IconPlay, "Run"))
+        if (ImGuiUtils.IconMenuItem(FontAwesomeHelper.IconPlay, "Run".Loc()))
         {
             scheduler.StartMacro(macro);
             ImGui.CloseCurrentPopup();
         }
 
-        if (ImGuiUtils.IconMenuItem(FontAwesomeHelper.IconCopy, "Copy Content"))
+        if (ImGuiUtils.IconMenuItem(FontAwesomeHelper.IconCopy, "Copy Content".Loc()))
         {
             ImGui.SetClipboardText(macro.Content);
             ImGui.CloseCurrentPopup();
         }
 
-        if (ImGuiUtils.IconMenuItem(FontAwesomeHelper.IconRename, "Rename"))
+        if (ImGuiUtils.IconMenuItem(FontAwesomeHelper.IconRename, "Rename".Loc()))
             RenameModal.Open(macro);
 
-        if (ImGuiUtils.IconMenuItem(FontAwesomeHelper.IconDelete, "Delete"))
+        if (ImGuiUtils.IconMenuItem(FontAwesomeHelper.IconDelete, "Delete".Loc()))
         {
             var currentFolderId = _state.SelectedFolderId;
             var expandedFoldersCopy = new HashSet<string>(_state.ExpandedFolders);
@@ -340,7 +342,7 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
         if (macro is ConfigMacro configMacro && !macro.IsGitMacro)
         {
             ImGui.Separator();
-            using var typeMenu = ImRaii.Menu("Type");
+            using var typeMenu = ImRaii.Menu("Type".Loc());
             if (typeMenu)
             {
                 var isNative = macro.Type == MacroType.Native;
@@ -361,14 +363,14 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
         }
 
         ImGui.Separator();
-        using var folderMenu = ImRaii.Menu("Move to folder");
+        using var folderMenu = ImRaii.Menu("Move to folder".Loc());
         if (folderMenu)
         {
-            ImGui.TextColored(ImGuiColors.DalamudViolet, "Select destination folder:");
+            ImGui.TextColored(ImGuiColors.DalamudViolet, "Select destination folder:".Loc());
             ImGui.Separator();
 
             var isInRoot = string.IsNullOrEmpty(macro.FolderPath);
-            if (ImGui.MenuItem("Root", null, isInRoot))
+            if (ImGui.MenuItem("Root".Loc(), null, isInRoot))
             {
                 if (!isInRoot)
                 {
@@ -392,7 +394,7 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
                 foreach (var folder in folders)
                 {
                     var isCurrentFolder = macro.FolderPath == folder;
-                    if (ImGui.MenuItem($"{folder}{(isCurrentFolder ? " (current)" : "")}", null, isCurrentFolder))
+                    if (ImGui.MenuItem($"{folder}{(isCurrentFolder ? " " + "(current)".Loc() : "")}", null, isCurrentFolder))
                     {
                         if (!isCurrentFolder)
                         {
@@ -409,7 +411,7 @@ public class MacrosTab(IMacroScheduler scheduler, MacroEditor macroEditor, GitMa
             }
 
             ImGui.Separator();
-            if (ImGui.MenuItem("Create new folder..."))
+            if (ImGui.MenuItem("Create new folder...".Loc()))
                 CreateFolderModal.Open();
         }
     }

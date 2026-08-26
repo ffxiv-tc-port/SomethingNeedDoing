@@ -1,4 +1,5 @@
 ﻿using Dalamud.Interface.Utility.Raii;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 
 namespace SomethingNeedDoing.Gui.Modals;
@@ -36,7 +37,7 @@ public static class RenameModal
         using var popup = ImRaii.PopupModal($"RenameMacroPopup##{nameof(RenameModal)}", ref IsOpen, ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoTitleBar);
         if (!popup) return;
 
-        ImGui.Text("Enter new name:");
+        ImGui.Text("Enter new name:".Loc());
         ImGui.SetNextItemWidth(-1);
         ImGuiUtils.SetFocusIfAppearing();
 
@@ -51,7 +52,7 @@ public static class RenameModal
 
         var confirmed = false;
         using (ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.3f, 1.0f)).Push(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 0.4f, 1.0f)))
-            confirmed = ImGui.Button("Confirm", new Vector2(150, 0)) || enterPressed;
+            confirmed = ImGui.Button("Confirm".Loc(), new Vector2(150, 0)) || enterPressed;
 
         if (confirmed && !string.IsNullOrWhiteSpace(_renameMacroBuffer))
         {
@@ -63,7 +64,7 @@ public static class RenameModal
         ImGui.SameLine();
 
         using (ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.5f, 0.3f, 0.3f, 1.0f)).Push(ImGuiCol.ButtonHovered, new Vector4(0.6f, 0.4f, 0.4f, 1.0f)))
-            if (ImGui.Button("Cancel", new Vector2(150, 0)) || (ImGui.IsKeyPressed(ImGuiKey.Escape) && ImGui.IsWindowFocused()))
+            if (ImGui.Button("Cancel".Loc(), new Vector2(150, 0)) || (ImGui.IsKeyPressed(ImGuiKey.Escape) && ImGui.IsWindowFocused()))
                 Close();
     }
 }

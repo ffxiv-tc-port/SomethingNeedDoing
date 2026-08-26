@@ -2,6 +2,7 @@
 using Dalamud.Interface.Utility.Raii;
 using ECommons.Configuration;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using Newtonsoft.Json;
 using System.IO;
 
@@ -48,18 +49,18 @@ public static class MigrationModal
 
         if (!migrationValid)
         {
-            ImGuiEx.Text(ImGuiColors.DalamudRed, "Migration Preview Failed");
+            ImGuiEx.Text(ImGuiColors.DalamudRed, "Migration Preview Failed".Loc());
 
             using (var errorBox = ImRaii.Child("ErrorBox", new Vector2(400, 100), false))
                 ImGui.TextWrapped(errorMessage);
 
-            ImGuiUtils.CenteredButtons(("Close", Close));
+            ImGuiUtils.CenteredButtons(("Close".Loc(), Close));
 
             return;
         }
 
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "Import Macros");
-        ImGui.TextUnformatted("Review the macros that will be imported from the old configuration.");
+        ImGui.TextColored(ImGuiColors.DalamudViolet, "Import Macros".Loc());
+        ImGui.TextUnformatted("Review the macros that will be imported from the old configuration.".Loc());
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -69,7 +70,7 @@ public static class MigrationModal
         //using (ImRaii.PushStyle(ImGuiStyleVar.ButtonTextAlign, new Vector2(0, 0.5f)))
         {
             var buttonHeight = ImGui.GetFrameHeight() * 1.5f;
-            if (ImGui.Button("Select All New Macros", new Vector2(-1, buttonHeight)))
+            if (ImGui.Button("Select All New Macros".Loc(), new Vector2(-1, buttonHeight)))
             {
                 selectAllNewMacros = !selectAllNewMacros;
                 var keys = newMacros.Keys.ToList();
@@ -101,7 +102,7 @@ public static class MigrationModal
                     {
                         ImGuiEx.TextV($"{name} ({macro.Type})");
                         ImGui.SameLine();
-                        ImGuiEx.TextV(ImGuiColors.DalamudGrey, $"in {macro.FolderPath}");
+                        ImGuiEx.TextV(ImGuiColors.DalamudGrey, "in ??".Loc(macro.FolderPath));
                     }
                 }
                 if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
@@ -111,17 +112,17 @@ public static class MigrationModal
                 {
                     ImGui.Indent(20);
 
-                    ImGui.TextUnformatted("Content:");
+                    ImGui.TextUnformatted("Content:".Loc());
                     using (ImRaii.Child($"Content##{name}", new Vector2(-1, 100), false))
                         ImGui.TextWrapped(macro.Content);
 
                     ImGui.Spacing();
-                    ImGui.TextUnformatted("Settings:");
-                    ImGui.BulletText($"Crafting Loop: {macro.Metadata.CraftingLoop}");
+                    ImGui.TextUnformatted("Settings:".Loc());
+                    ImGui.BulletText("Crafting Loop: ??".Loc(macro.Metadata.CraftingLoop));
                     if (macro.Metadata.CraftingLoop)
-                        ImGui.BulletText($"Loop Count: {macro.Metadata.CraftLoopCount}");
+                        ImGui.BulletText("Loop Count: ??".Loc(macro.Metadata.CraftLoopCount));
                     if (macro.Metadata.TriggerEvents.Count > 0)
-                        ImGui.BulletText($"Trigger Events: {string.Join(", ", macro.Metadata.TriggerEvents)}");
+                        ImGui.BulletText("Trigger Events: ??".Loc(string.Join(", ", macro.Metadata.TriggerEvents)));
 
                     ImGui.Unindent(20);
                 }
@@ -133,7 +134,7 @@ public static class MigrationModal
         child.Dispose();
         ImGui.Spacing();
 
-        ImGuiUtils.CenteredButtons(("Import Selected Macros", () => { ApplySelectedChanges(); Close(); }), ("Cancel", Close));
+        ImGuiUtils.CenteredButtons(("Import Selected Macros".Loc(), () => { ApplySelectedChanges(); Close(); }), ("Cancel".Loc(), Close));
     }
 
     private static float CalculateRequiredHeight()
@@ -227,7 +228,7 @@ public static class MigrationModal
             if (oldConfig == null)
             {
                 migrationValid = false;
-                errorMessage = "No valid configuration found in clipboard or config file";
+                errorMessage = "No valid configuration found in clipboard or config file".Loc();
                 return;
             }
 
@@ -246,7 +247,7 @@ public static class MigrationModal
         catch (Exception ex)
         {
             migrationValid = false;
-            errorMessage = $"Error previewing migration: {ex.Message}";
+            errorMessage = "Error previewing migration: ??".Loc(ex.Message);
             FrameworkLogger.Error(ex, "Failed to preview migration");
         }
     }
@@ -358,11 +359,11 @@ public static class MigrationModal
                 C.Macros.Add(macro);
 
             C.Save();
-            Svc.Chat.Print("Selected macros imported successfully!");
+            Svc.Chat.Print("Selected macros imported successfully!".Loc());
         }
         catch (Exception ex)
         {
-            Svc.Chat.PrintErrorMsg($"Failed to import macros: {ex.Message}");
+            Svc.Chat.PrintErrorMsg("Failed to import macros: ??".Loc(ex.Message));
         }
     }
 

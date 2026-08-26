@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DALAMUD_HOME: /tmp/dalamud
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Download Dalamud (pinned TC-compatible build)
+        run: |
+          wget https://github.com/ffxiv-tc-port/DalamudPluginsTC/releases/download/dalamud-pin-v12.0.2/dalamud-api12-net9.zip -O ${{ env.DALAMUD_HOME }}.zip
+          unzip ${{ env.DALAMUD_HOME }}.zip -d ${{ env.DALAMUD_HOME }} || true
+
+      - name: Restore Project
+        run: dotnet restore
+
+      - name: Compute version
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "VER=$ver" >> "$GITHUB_ENV"
+
+      - name: Build Project
+        run: dotnet build --configuration Release SomethingNeedDoing/SomethingNeedDoing.csproj -p:Version=${{ env.VER }} -p:AssemblyVersion=${{ env.VER }} -p:FileVersion=${{ env.VER }}
+
+      - name: Rename artifact to SomethingNeedDoing.zip
+        run: |
+          zip_path=$(find . -name latest.zip | head -1)
+          cp "$zip_path" "SomethingNeedDoing.zip"
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: |
+            SomethingNeedDoing.zip
+            SomethingNeedDoing/bin/Release/SomethingNeedDoing/SomethingNeedDoing.json
+          generate_release_notes: true

@@ -3,6 +3,7 @@ using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using ECommons.MathHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using SomethingNeedDoing.Gui.Editor;
@@ -60,7 +61,7 @@ public class MacroEditor(IMacroScheduler scheduler, GitMacroManager gitManager, 
     private void DrawEmptyState()
     {
         var center = ImGui.GetContentRegionAvail() / 2;
-        var text = "Select a macro or create a new one";
+        var text = "Select a macro or create a new one".Loc();
         var textSize = ImGui.CalcTextSize(text);
         ImGui.SetCursorPos(ImGui.GetCursorPos() + center - textSize / 2);
         ImGui.TextColored(ImGuiColors.DalamudGrey, text);
@@ -82,17 +83,17 @@ public class MacroEditor(IMacroScheduler scheduler, GitMacroManager gitManager, 
         var group = new ImGuiEx.EzButtonGroup();
         var startBtn = GetStartOrResumeAction(macro);
         group.AddIconOnly(FontAwesomeIcon.PlayCircle, () => startBtn.action(), startBtn.tooltip);
-        group.AddIconOnly(FontAwesomeIcon.PauseCircle, () => _scheduler.PauseMacro(macro.Id), "Pause", new() { Condition = () => _scheduler.GetMacroState(macro.Id) is MacroState.Running });
-        group.AddIconOnly(FontAwesomeIcon.StopCircle, () => _scheduler.StopMacro(macro.Id), "Stop");
-        group.AddIconOnly(FontAwesomeIcon.Clipboard, () => Copy(macro.Content), "Copy");
+        group.AddIconOnly(FontAwesomeIcon.PauseCircle, () => _scheduler.PauseMacro(macro.Id), "Pause".Loc(), new() { Condition = () => _scheduler.GetMacroState(macro.Id) is MacroState.Running });
+        group.AddIconOnly(FontAwesomeIcon.StopCircle, () => _scheduler.StopMacro(macro.Id), "Stop".Loc());
+        group.AddIconOnly(FontAwesomeIcon.Clipboard, () => Copy(macro.Content), "Copy".Loc());
         group.Draw();
     }
 
     private (Action action, string tooltip) GetStartOrResumeAction(IMacro macro)
         => _scheduler.GetMacroState(macro.Id) switch
         {
-            MacroState.Paused => (() => _scheduler.ResumeMacro(macro.Id), "Resume"),
-            _ => (() => _scheduler.StartMacro(macro), "Start")
+            MacroState.Paused => (() => _scheduler.ResumeMacro(macro.Id), "Resume".Loc()),
+            _ => (() => _scheduler.StartMacro(macro), "Start".Loc())
         };
 
     private void DrawRightAlignedControls(IMacro macro)
@@ -112,24 +113,24 @@ public class MacroEditor(IMacroScheduler scheduler, GitMacroManager gitManager, 
 
         using (ImRaii.PushColor(ImGuiCol.Text, statusColor))
         {
-            if (ImGuiUtils.IconButton(statusIcon, macroCount > 0 ? $"{macroCount} running" : "No macros running"))
+            if (ImGuiUtils.IconButton(statusIcon, macroCount > 0 ? "?? running".Loc(macroCount) : "No macros running".Loc()))
                 ws.Toggle<StatusWindow>();
         }
 
         ImGui.SameLine();
-        if (ImGuiUtils.IconButton(editor.IsShowingLineNumbers ? FontAwesomeHelper.IconSortAsc : FontAwesomeHelper.IconSortDesc, "Toggle Line Numbers"))
+        if (ImGuiUtils.IconButton(editor.IsShowingLineNumbers ? FontAwesomeHelper.IconSortAsc : FontAwesomeHelper.IconSortDesc, "Toggle Line Numbers".Loc()))
             editor.IsShowingLineNumbers ^= true;
 
         ImGui.SameLine();
-        if (ImGuiUtils.IconButton(editor.IsShowingWhitespace ? FontAwesomeHelper.IconInvisible : FontAwesomeHelper.IconVisible, "Show Whitespace"))
+        if (ImGuiUtils.IconButton(editor.IsShowingWhitespace ? FontAwesomeHelper.IconInvisible : FontAwesomeHelper.IconVisible, "Show Whitespace".Loc()))
             editor.IsShowingWhitespace ^= true;
 
         ImGui.SameLine();
-        if (ImGuiUtils.IconButton(editor.IsHighlightingSyntax ? FontAwesomeHelper.IconCheck : FontAwesomeHelper.IconXmark, "Syntax Highlighting"))
+        if (ImGuiUtils.IconButton(editor.IsHighlightingSyntax ? FontAwesomeHelper.IconCheck : FontAwesomeHelper.IconXmark, "Syntax Highlighting".Loc()))
             editor.IsHighlightingSyntax ^= true;
 
         ImGui.SameLine();
-        if (ImGuiUtils.IconButton(FontAwesomeIcon.Cog, "Settings"))
+        if (ImGuiUtils.IconButton(FontAwesomeIcon.Cog, "Settings".Loc()))
             _showSettings ^= true;
 
         if (macro is ConfigMacro { IsGitMacro: true } configMacro)
@@ -137,9 +138,9 @@ public class MacroEditor(IMacroScheduler scheduler, GitMacroManager gitManager, 
             ImGui.SameLine();
             var (updateIndicator, updateColor, tooltip) = _updateState switch
             {
-                UpdateState.None => ("0", ImGuiColors.DalamudGrey, "No updates available"),
-                UpdateState.Available => ("1", ImGuiColors.DPSRed, "Update available (click to update)"),
-                _ => ("?", ImGuiColors.DalamudGrey, "Check for updates")
+                UpdateState.None => ("0", ImGuiColors.DalamudGrey, "No updates available".Loc()),
+                UpdateState.Available => ("1", ImGuiColors.DPSRed, "Update available (click to update)".Loc()),
+                _ => ("?", ImGuiColors.DalamudGrey, "Check for updates".Loc())
             };
 
             if (ImGuiUtils.IconButtonWithNotification(FontAwesomeIcon.Bell, updateIndicator, updateColor, tooltip))
@@ -184,9 +185,9 @@ public class MacroEditor(IMacroScheduler scheduler, GitMacroManager gitManager, 
         using var _ = ImRaii.PushColor(ImGuiCol.FrameBg, new Vector4(0.1f, 0.1f, 0.1f, 1.0f));
 
         var chars = macro.Content.Length;
-        ImGuiEx.Text(ImGuiColors.DalamudGrey, $"Name: {macro.Name}  |  Lines: {editor.Lines}  |  Chars: {chars}  |  Column: {editor.Column}  |  Readonly: {editor.ReadOnly}  |");
+        ImGuiEx.Text(ImGuiColors.DalamudGrey, "Name: ??  |  Lines: ??  |  Chars: ??  |  Column: ??  |  Readonly: ??  |".Loc(macro.Name, editor.Lines, chars, editor.Column, editor.ReadOnly));
         ImGui.SameLine(0, 5);
-        ImGuiEx.Text(ImGuiColors.DalamudGrey, $"Type: {macro.Type}");
+        ImGuiEx.Text(ImGuiColors.DalamudGrey, "Type: ??".Loc(macro.Type));
         if (ImGui.IsItemClicked())
             _wantOpenSelector = true;
 
@@ -209,7 +210,7 @@ public class MacroEditor(IMacroScheduler scheduler, GitMacroManager gitManager, 
             ImGui.SameLine(0, 0);
             ImGuiEx.Text(ImGuiColors.DalamudGrey, " | ");
             ImGui.SameLine(0, 0);
-            ImGuiUtils.DrawLink(ImGuiColors.DalamudGrey, $"Git: {configMacro.GitInfo}", configMacro.GitInfo.RepositoryUrl);
+            ImGuiUtils.DrawLink(ImGuiColors.DalamudGrey, "Git: ??".Loc(configMacro.GitInfo), configMacro.GitInfo.RepositoryUrl);
         }
     }
 

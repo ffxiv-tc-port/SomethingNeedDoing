@@ -1,5 +1,6 @@
 ﻿using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Managers;
 using System.Threading.Tasks;
 
@@ -45,11 +46,11 @@ public class CreateMacroModal(GitMacroManager gitManager)
 
         ImGuiEx.Icon(FontAwesomeHelper.IconNew);
         ImGui.SameLine();
-        ImGui.Text("Create New Macro");
+        ImGui.Text("Create New Macro".Loc());
         ImGui.Separator();
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("Name:");
+        ImGui.Text("Name:".Loc());
 
         ImGui.SameLine();
         ImGuiUtils.SetFocusIfAppearing();
@@ -59,19 +60,19 @@ public class CreateMacroModal(GitMacroManager gitManager)
         ImGui.Spacing();
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("Type:");
+        ImGui.Text("Type:".Loc());
         ImGui.SameLine();
 
         _newMacroType = ImGuiUtils.EnumRadioButtons(_newMacroType);
 
         ImGui.Spacing();
 
-        ImGuiUtils.Section("Optional: Import from Github", () =>
+        ImGuiUtils.Section("Optional: Import from Github".Loc(), () =>
         {
             ImGui.AlignTextToFramePadding();
-            ImGui.Text("GitHub URL:");
+            ImGui.Text("GitHub URL:".Loc());
             ImGui.SameLine();
-            ImGuiEx.Tooltip("Enter a GitHub URL (e.g., https://github.com/owner/repo/blob/branch/path)");
+            ImGuiEx.Tooltip("Enter a GitHub URL (e.g., https://github.com/owner/repo/blob/branch/path)".Loc());
 
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             ImGui.InputText("##GitHubUrl", ref _githubUrl, 500);
@@ -87,10 +88,10 @@ public class CreateMacroModal(GitMacroManager gitManager)
         ImGui.Spacing();
 
         if (_isImporting)
-            ImGuiUtils.CenteredButtons(("Importing...", () => { }));
+            ImGuiUtils.CenteredButtons(("Importing...".Loc(), () => { }));
         else
         {
-            ImGuiUtils.CenteredButtons(("Create", async () =>
+            ImGuiUtils.CenteredButtons(("Create".Loc(), async () =>
             {
                 if (!string.IsNullOrWhiteSpace(_githubUrl))
                     await ImportFromGitHub();
@@ -110,7 +111,7 @@ public class CreateMacroModal(GitMacroManager gitManager)
                     Close();
                 }
             }
-            ), ("Cancel", Close));
+            ), ("Cancel".Loc(), Close));
         }
     }
 
@@ -134,7 +135,7 @@ public class CreateMacroModal(GitMacroManager gitManager)
         }
         catch (Exception ex)
         {
-            _importError = $"Failed to import from GitHub: {ex.Message}";
+            _importError = "Failed to import from GitHub: ??".Loc(ex.Message);
             FrameworkLogger.Error(ex, "Failed to import macro from GitHub");
         }
         finally

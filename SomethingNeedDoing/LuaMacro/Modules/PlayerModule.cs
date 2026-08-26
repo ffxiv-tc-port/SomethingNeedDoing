@@ -1,4 +1,5 @@
-﻿using FFXIVClientStructs.FFXIV.Client.Game.UI;
+﻿using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using NLua;
 using SomethingNeedDoing.Core.Interfaces;
@@ -21,6 +22,14 @@ public unsafe class PlayerModule : LuaModuleBase
     [LuaFunction] public uint FishingBait => Ps->FishingBait;
 
     [LuaFunction] public EntityWrapper Entity => new(Player.Object);
+    [LuaFunction] public ushort TerritoryType => Svc.ClientState.TerritoryType;
+
+    /// <summary>房屋所在的房區（Ward），不在房屋範圍內時為 -1。</summary>
+    [LuaFunction] public sbyte HousingWard => HousingManager.Instance() != null ? HousingManager.Instance()->GetCurrentWard() : (sbyte)-1;
+    /// <summary>房屋所在的地皮（Plot），不在房屋範圍內時為 -1。</summary>
+    [LuaFunction] public sbyte HousingPlot => HousingManager.Instance() != null ? HousingManager.Instance()->GetCurrentPlot() : (sbyte)-1;
+    /// <summary>室內房間編號（例如公寓樓層/房號），不在室內時為 0。</summary>
+    [LuaFunction] public short HousingRoom => HousingManager.Instance() != null ? HousingManager.Instance()->GetCurrentRoom() : (short)0;
     [LuaFunction] public FreeCompanyWrapper FreeCompany => new();
 
     [LuaFunction] public JobWrapper Job => new(Player.JobId);

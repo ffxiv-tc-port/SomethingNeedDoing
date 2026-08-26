@@ -177,6 +177,15 @@ public unsafe class InventoryModule : LuaModuleBase
 
         [LuaDocs] public void Use() => Game.UseItem(ItemId, IsHighQuality);
 
+        [LuaDocs(description: "Opens the right-click context menu for this inventory slot, as if the item was right-clicked.")]
+        public void OpenContextMenu()
+        {
+            var addonName = $"InventoryGrid{(int)Container}E";
+            var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(addonName);
+            var addonId = addon != null ? addon->Id : (uint)0;
+            AgentInventoryContext.Instance()->OpenForItemSlot(Container, Slot, addonId);
+        }
+
         [LuaDocs]
         [Changelog("12.8")]
         public void Desynth()
