@@ -159,7 +159,7 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
 
         var craftCount = macro.Metadata.CraftLoopCount;
         var contents = macro.ContentSansMetadata();
-        var inRecipeNote = Svc.GameGui.GetAddonByName("RecipeNote") != IntPtr.Zero;
+        var inRecipeNote = Svc.GameGui.GetAddonByName("RecipeNote").Address != IntPtr.Zero;
         if (C.UseCraftLoopTemplate)
         {
             var template = C.CraftLoopTemplate;
