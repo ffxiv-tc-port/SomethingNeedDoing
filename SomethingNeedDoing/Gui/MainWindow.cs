@@ -64,12 +64,17 @@ public class MainWindow : Window
 
     public override void PreDraw()
     {
+        base.PreDraw();
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(10, 10));
         ClickedHeaderLastFrame = ClickedHeaderCurrentFrame;
         ClickedHeaderCurrentFrame = false;
     }
 
-    public override void PostDraw() => ImGui.PopStyleVar();
+    public override void PostDraw()
+    {
+        ImGui.PopStyleVar();
+        base.PostDraw();
+    }
 
     public override void Draw()
     {
