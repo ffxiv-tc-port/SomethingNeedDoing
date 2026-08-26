@@ -66,7 +66,7 @@ public interface IMacroCommand
     /// <summary>
     /// Gets or sets the item quality modifier for the command.
     /// </summary>
-    ItemQualityModifier? ItemQualityModifier { get; set; }
+    HqModifier? ItemQualityModifier { get; set; }
 
     /// <summary>
     /// Gets or sets the error if modifier for the command.

@@ -39,15 +39,6 @@ public class EnginesModule : LuaModuleBase
             [("content", LuaTypeConverter.GetLuaType(typeof(string)), "The content to execute", null)],
             null,
             true
-        ),
-            new(
-            ModuleName,
-            "RunAsync",
-            "Executes content using the best available engine asynchronously",
-            LuaTypeConverter.GetLuaType(typeof(Task)),
-            [("content", LuaTypeConverter.GetLuaType(typeof(string)), "The content to execute", null)],
-            null,
-            true
         )
         };
 
@@ -59,16 +50,6 @@ public class EnginesModule : LuaModuleBase
                 "Run",
                 $"Executes content using the {engine.Name} engine (fire and forget)",
                 LuaTypeConverter.GetLuaType(typeof(void)),
-                [("content", LuaTypeConverter.GetLuaType(typeof(string)), "The content to execute", null)],
-                null,
-                true
-            ));
-
-            moduleDocs.Add(new LuaFunctionDoc(
-                $"{ModuleName}.{name}",
-                "RunAsync",
-                $"Executes content using the {engine.Name} engine asynchronously",
-                LuaTypeConverter.GetLuaType(typeof(Task)),
                 [("content", LuaTypeConverter.GetLuaType(typeof(string)), "The content to execute", null)],
                 null,
                 true
@@ -94,15 +75,6 @@ public class EnginesModule : LuaModuleBase
             [("content", LuaTypeConverter.GetLuaType(typeof(string)), "The content to execute", null)],
             null,
             true
-        ),
-            new(
-            "Engines",
-            "RunAsync",
-            "Executes content using the best available engine asynchronously",
-            LuaTypeConverter.GetLuaType(typeof(Task)),
-            [("content", LuaTypeConverter.GetLuaType(typeof(string)), "The content to execute", null)],
-            null,
-            true
         )
         };
 
@@ -118,16 +90,6 @@ public class EnginesModule : LuaModuleBase
                 null,
                 true
             ));
-
-            moduleDocs.Add(new LuaFunctionDoc(
-                $"Engines.{engineName}",
-                "RunAsync",
-                $"Executes content using the {engineName} engine asynchronously",
-                LuaTypeConverter.GetLuaType(typeof(Task)),
-                [("content", LuaTypeConverter.GetLuaType(typeof(string)), "The content to execute", null)],
-                null,
-                true
-            ));
         }
 
         docs.RegisterModule("Engines", moduleDocs);
@@ -138,16 +100,28 @@ public class EnginesModule : LuaModuleBase
         // Register each engine
         foreach (var (name, engine) in _engines)
         {
+            var captured = engine;
             lua[$"{ModuleName}.{name}"] = new
             {
-                Run = new Action<string>(content => ExecuteEngine(engine, content)),
-                RunAsync = new Func<string, Task>(content => ExecuteEngineAsync(engine, content)),
+                Run = new Action<string>(content => ExecuteEngine(captured, content)),
+                // 相容層:上游已移除 RunAsync。它回傳的 Task 在 Lua 端本來就 await 不了,
+                // 行為上等同 fire-and-forget;這裡保留名稱並轉接到 Run,免得舊巨集直接壞掉。
+                RunAsync = new Action<string>(content => { WarnRunAsyncDeprecated(); ExecuteEngine(captured, content); }),
             };
         }
 
         // Register helper functions for auto-detection
         lua[$"{ModuleName}.Run"] = new Action<string>(ExecuteBestEngine);
-        lua[$"{ModuleName}.RunAsync"] = new Func<string, Task>(ExecuteBestEngineAsync);
+        lua[$"{ModuleName}.RunAsync"] = new Action<string>(content => { WarnRunAsyncDeprecated(); ExecuteBestEngine(content); });
+    }
+
+    private static bool _warnedRunAsync;
+
+    private static void WarnRunAsyncDeprecated()
+    {
+        if (_warnedRunAsync) return;
+        _warnedRunAsync = true;
+        FrameworkLogger.Warning("Engines.RunAsync is deprecated and now behaves exactly like Engines.Run; please switch to Run.");
     }
 
     /// <summary>
@@ -172,14 +146,6 @@ public class EnginesModule : LuaModuleBase
     }
 
     /// <summary>
-    /// Executes content using the specified engine asynchronously.
-    /// </summary>
-    /// <param name="engine">The engine to use.</param>
-    /// <param name="content">The content to execute.</param>
-    /// <returns>A task representing the execution.</returns>
-    private async Task ExecuteEngineAsync(IEngine engine, string content) => await engine.ExecuteAsync(content);
-
-    /// <summary>
     /// Executes content using the best available engine.
     /// </summary>
     /// <param name="content">The content to execute.</param>
@@ -187,19 +153,6 @@ public class EnginesModule : LuaModuleBase
     {
         if (FindBestEngine(content) is { } engine)
             ExecuteEngine(engine, content);
-        else
-            FrameworkLogger.Warning($"No suitable engine found for content: {content}");
-    }
-
-    /// <summary>
-    /// Executes content using the best available engine asynchronously.
-    /// </summary>
-    /// <param name="content">The content to execute.</param>
-    /// <returns>A task representing the execution.</returns>
-    private async Task ExecuteBestEngineAsync(string content)
-    {
-        if (FindBestEngine(content) is { } engine)
-            await ExecuteEngineAsync(engine, content);
         else
             FrameworkLogger.Warning($"No suitable engine found for content: {content}");
     }

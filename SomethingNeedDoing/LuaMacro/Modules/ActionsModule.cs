@@ -12,7 +12,14 @@ public unsafe class ActionsModule : LuaModuleBase
 
     [LuaFunction] public void ExecuteAction(uint actionID, ActionType actionType = ActionType.Action) => ActionManager.Instance()->UseAction(actionType, actionID);
     [LuaFunction] public void ExecuteGeneralAction(uint actionID) => ActionManager.Instance()->UseAction(ActionType.GeneralAction, actionID);
-    [LuaFunction] public void Teleport(uint aetheryteId) => Telepo.Instance()->Teleport(aetheryteId, 0);
+    [LuaFunction]
+    public void Teleport(uint aetheryteId)
+    {
+        // 傳給非傳送點的 id 不會報錯,只會靜默什麼都不做
+        if (GetRow<Sheets.Aetheryte>(aetheryteId) is not { IsAetheryte: true })
+            throw new InvalidOperationException($"{aetheryteId} is not a valid aetheryte id");
+        Telepo.Instance()->Teleport(aetheryteId, 0);
+    }
     [LuaFunction] public void CancelCast() => UIState.Instance()->Hotbar.CancelCast();
 
     [LuaFunction(description: "Returns LogMessage id")]

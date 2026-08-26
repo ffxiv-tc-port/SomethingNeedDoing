@@ -22,6 +22,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         P = this;
         ECommonsMain.Init(pluginInterface, this, Module.ObjectFunctions, Module.DalamudReflector);
+        SvcEx.Init(pluginInterface);
         ECommons.LanguageHelpers.Localization.Init("ChineseTraditional");
         CallbackNotifier.Init();
 

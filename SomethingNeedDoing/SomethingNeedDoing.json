@@ -4,7 +4,7 @@
   "Punchline": "工作，工作。",
   "Description": "現在不只能用於生產，功能更多！",
   "ApplicableVersion": "any",
-  "DalamudApiLevel": 12,
+  "DalamudApiLevel": 13,
   "RepoUrl": "https://github.com/ffxiv-tc-port/SomethingNeedDoing",
   "IconUrl": "https://raw.githubusercontent.com/ffxiv-tc-port/DalamudPluginsTC/main/icons/SomethingNeedDoing.png",
   "Tags": [

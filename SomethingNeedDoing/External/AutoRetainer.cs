@@ -101,8 +101,63 @@ public class AutoRetainer : IPC
     public readonly Func<ulong, long?> GetClosestRetainerVentureSecondsRemaining = null!;
 
     [EzIPC("PluginState.%m")]
-    [LuaFunction(description: "Retrieves one item slot from the currently open retainer's inventory into the player's own bags, without waiting to confirm it landed. Returns false once nothing is left or the player's inventory is nearly full; loop this with a short yield between calls.")]
+    [LuaFunction(description: "Retrieves one item slot from the currently open retainer's inventory into the player's own bags, without waiting to confirm it landed. Slots that already have a retrieve command in flight are skipped, so looping this fires roughly one command per slot. Returns false once nothing is left, the player's inventory is nearly full, or every remaining slot is already in flight; loop this with a short yield between calls, then let the inventory settle and start a new round.")]
     public readonly Func<bool> RetrieveNextRetainerItemSlot = null!;
+
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(description: "Forgets which retainer slots RetrieveNextRetainerItemSlot already fired at, so the next call considers every occupied slot again. Call at the start of each retrieval sweep. Older AutoRetainer builds do not provide this method, so wrap the call in pcall.")]
+    public readonly Action ResetRetainerRetrieveTracking = null!;
+
+    // ── 指定道具的取回介面 ────────────────────────────────────────────────
+    // RetrieveNextRetainerItemSlot 取的是「第一個有東西的格子」,想只取特定道具(例如只把裝備
+    // 拿回來交稀有品)的巨集用不上。AutoRetainer 那端另外提供了一組以道具 ID 為單位的介面,
+    // 這裡把它接出來。⚠️ 舊版 AutoRetainer 沒有這三個方法,呼叫端要先問 API 版本(用 pcall 包住)。
+
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(description: "Version of AutoRetainer's specific-item retainer retrieve API (RetrieveRetainerItemSlotById / GetOpenRetainerItemQuantity). Older builds do not provide this method at all, so wrap the call in pcall and treat a failure as 'not supported'.")]
+    public readonly Func<int> GetRetainerItemRetrieveApiVersion = null!;
+
+    /// <summary>
+    /// uint itemId, bool hqOnly, bool includeCrystals
+    /// </summary>
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(
+        description: "Fires one retrieve command at the first slot of the currently open retainer holding the given item, into the player's own bags. Always takes the WHOLE slot. Returns the quantity aimed at (>= 1) on success, or: 0 = proved absent, -1 = retainer storage could not be read (NOT 'absent'), -2 = every matching slot already has a command in flight (let it settle and retry), -3 = player bags at or below AutoRetainer's reserve, -4 = unique item the player already owns (will never succeed, skip it), -5 = only present in the crystal container and includeCrystals was false.",
+        parameterDescriptions: ["itemId", "hqOnly", "includeCrystals"])]
+    public readonly Func<uint, bool, bool, int> RetrieveRetainerItemSlotById = null!;
+
+    /// <summary>
+    /// uint itemId, bool hqOnly, bool includeCrystals
+    /// </summary>
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(
+        description: "How many of the given item the currently open retainer holds. Returns the total (0 meaning proved absent), or -1 when the retainer's storage could not be read - -1 is 'unknown', not 'none'.",
+        parameterDescriptions: ["itemId", "hqOnly", "includeCrystals"])]
+    public readonly Func<uint, bool, bool, int> GetOpenRetainerItemQuantity = null!;
+
+    // ── 用 AutoRetainer 自己的任務鏈,不要在巨集裡重造 addon 操作 ──────────
+    // 下面四個門後面是 AutoRetainer 正式流程每天在跑的那條鏈(走到鈴前、開雇員清單、選雇員、
+    // 開道具管理、去大國防聯軍繳交)。巨集自己拼這些需要一串寫死的 callback 參數與選單索引 ——
+    // 離線驗不了、改版靜默失效、選單文字還隨語系不同。
+    // ⚠️ 這些都是 Enqueue:呼叫後任務進佇列就回來了,要自己輪詢 IsBusy() 等它做完。
+
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(
+        description: "Enqueues AutoRetainer's own chain to walk to the nearest summoning bell, open it, select the named retainer and open their item storage. Returns false without enqueuing anything when a precondition fails (no such retainer on this character, player unavailable, AutoRetainer already busy) - stop rather than waiting out a timeout in that case. This is asynchronous: poll IsBusy until it goes false.",
+        parameterDescriptions: ["retainerName"])]
+    public readonly Func<string, bool> EnqueueOpenRetainerItemStorage = null!;
+
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(description: "Enqueues closing whatever retainer UI is open, back out to the world. Safe to call when nothing is open. Asynchronous: poll IsBusy until it goes false.")]
+    public readonly Action EnqueueCloseRetainer = null!;
+
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(description: "Enqueues the same flow as AutoRetainer's Deliver Items button: Lifestream navigates to the Grand Company if needed, then AutoRetainer interacts with the NPC, opens the supply list on the expert delivery tab and turns automatic handin on. ⚠️ This is the full flow, so it also runs the seal-spending purchase step. Returns false without enqueuing when the character has no Grand Company or something is already busy.")]
+    public readonly Func<bool> EnqueueGCDeliverItems = null!;
+
+    [EzIPC("PluginState.%m")]
+    [LuaFunction(description: "Retainer names of the current character that have an entrust plan assigned in AutoRetainer, in AutoRetainer's own order. Lets a macro act on 'the retainers the user configured' instead of a hardcoded list.")]
+    public readonly Func<List<string>> GetRetainersWithEntrustPlan = null!;
 
     [EzIPC("GC.%m")]
     [LuaFunction(description: "Enqueues initiation")]
@@ -121,6 +176,31 @@ public class AutoRetainer : IPC
         parameterDescriptions: ["cid"])]
     [Changelog("12.19")]
     public OfflineCharacterDataWrapper GetOfflineCharacterData(ulong cid) => new(StaticsService.AutoRetainerApi.GetOfflineCharacterData(cid));
+
+    // 這是「哪些雇員被使用者掛了設定」的唯一可讀來源。OfflineCharacterData 只有雇員的名字與探險
+    // 狀態,使用者在 AutoRetainer 裡對個別雇員做的設定(存放計畫、存入重複品、提金幣…)在另一份
+    // AdditionalRetainerData 裡,以 (角色 CID, 雇員名) 為鍵。巨集想「只處理掛了某個存放計畫的雇員」
+    // 就得靠它。
+    [LuaFunction(
+        description: "Gets AutoRetainer's per-retainer settings (entrust plan, entrust duplicates, gil handling) for one retainer of one character, keyed by character CID and retainer name.",
+        parameterDescriptions: ["cid", "retainerName"])]
+    public AdditionalRetainerDataWrapper GetAdditionalRetainerData(ulong cid, string retainerName) => new(StaticsService.AutoRetainerApi.GetAdditionalRetainerData(cid, retainerName));
+
+    public class AdditionalRetainerDataWrapper(AdditionalRetainerData data) : IWrapper
+    {
+        /// <summary>Guid 對 Lua 沒有意義,一律以字串呈現。空計畫是 Guid.Empty,不是 null。</summary>
+        [LuaDocs(description: "The entrust plan's id as a string. All-zero (\"00000000-0000-0000-0000-000000000000\") means no plan is assigned - test HasEntrustPlan instead of comparing strings.")]
+        public string EntrustPlanId => data.EntrustPlan.ToString();
+
+        [LuaDocs(description: "Whether this retainer has an entrust plan assigned in AutoRetainer.")]
+        public bool HasEntrustPlan => data.EntrustPlan != Guid.Empty;
+
+        [LuaDocs] public bool EntrustDuplicates => data.EntrustDuplicates;
+        [LuaDocs] public bool WithdrawGil => data.WithdrawGil;
+        [LuaDocs] public bool Deposit => data.Deposit;
+        [LuaDocs] public bool EnablePlanner => data.EnablePlanner;
+        [LuaDocs] public int Ilvl => data.Ilvl;
+    }
 
     public class OfflineCharacterDataWrapper(OfflineCharacterData data) : IWrapper
     {

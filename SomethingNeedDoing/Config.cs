@@ -1,7 +1,9 @@
 ﻿using Dalamud.Game.Text;
 using ECommons.Configuration;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
+using SomethingNeedDoing.Core.Interfaces;
 using System.IO;
 
 namespace SomethingNeedDoing;
@@ -315,6 +317,7 @@ public class ConfigFactory : DefaultSerializationFactory, ISerializationFactory
         TypeNameAssemblyFormatHandling = TypeNameAssemblyFormatHandling.Simple,
         SerializationBinder = new CustomSerializationBinder(),
         Formatting = Formatting.Indented,
+        Converters = [new IMacroDependencyConverter()],
     };
 
     public class CustomSerializationBinder : DefaultSerializationBinder
@@ -332,6 +335,66 @@ public class ConfigFactory : DefaultSerializationFactory, ISerializationFactory
                 throw;
             }
         }
+    }
+
+    /// <summary>
+    /// 把 JSON 還原成具體的 <see cref="IMacroDependency"/> 實作型別。
+    /// 舊設定檔裡的依賴項可能沒有 $type 標記(例如手改過、或由 git 巫集的 metadata 帶進來),
+    /// 這時 Newtonsoft 會因為無法實例化介面而整份反序列化失敗 ⇒ 使用者的巴集清單會消失。
+    /// ⚠️ 與上游不同的是:上游一律用 Source 字串猜型別,但那會讓本來有 $type 的設定反而被猜錯
+    /// (例如 GitLab 上的 GitDependency 會因為開頭是 https:// 而被归成 HttpDependency)。
+    /// 所以這裡改成 **$type 優先,沒有時才退回猜測**。
+    /// </summary>
+    public class IMacroDependencyConverter : JsonConverter
+    {
+        public override bool CanConvert(Type objectType) => objectType == typeof(IMacroDependency);
+
+        public override object? ReadJson(JsonReader reader, Type objectType, object? existingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null)
+                return null;
+
+            var jObject = JObject.Load(reader);
+
+            var concreteType = ResolveByTypeTag(jObject, serializer) ?? ResolveBySource(jObject);
+
+            using var newReader = jObject.CreateReader();
+            return serializer.Deserialize(newReader, concreteType);
+        }
+
+        private static Type? ResolveByTypeTag(JObject jObject, JsonSerializer serializer)
+        {
+            if (jObject["$type"]?.ToString() is not { Length: > 0 } tag)
+                return null;
+            try
+            {
+                var comma = tag.IndexOf(',');
+                var typeName = comma < 0 ? tag : tag[..comma].Trim();
+                var assemblyName = comma < 0 ? null : tag[(comma + 1)..].Trim();
+                var resolved = serializer.SerializationBinder.BindToType(assemblyName, typeName);
+                return typeof(IMacroDependency).IsAssignableFrom(resolved) ? resolved : null;
+            }
+            catch (Exception ex)
+            {
+                Svc.Log.Warning($"[{nameof(IMacroDependencyConverter)}] $type [{tag}] could not be resolved, falling back to Source sniffing: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static Type ResolveBySource(JObject jObject)
+        {
+            var source = jObject["Source"]?.ToString() ?? string.Empty;
+            return source switch
+            {
+                var s when s.StartsWith("git://") || s.Contains("github.com") => typeof(GitDependency),
+                var s when Guid.TryParse(s, out _) => typeof(LocalMacroDependency),
+                var s when s.StartsWith("http://") || s.StartsWith("https://") => typeof(HttpDependency),
+                var s when !string.IsNullOrEmpty(s) && (s.Contains('\\') || s.Contains('/')) => typeof(LocalDependency),
+                _ => throw new JsonException($"Unknown dependency source type [{source}]."),
+            };
+        }
+
+        public override void WriteJson(JsonWriter writer, object? value, JsonSerializer serializer) => serializer.Serialize(writer, value);
     }
 }
 

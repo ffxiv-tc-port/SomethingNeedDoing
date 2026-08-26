@@ -44,8 +44,24 @@ public unsafe class AddonModule : LuaModuleBase
 
     private static void DetourReceiveEvent(AtkUnitBase* thisPtr, AtkEventType eventType, int which, AtkEvent* atkEvent, AtkEventData* data)
     {
+        // DebugUnhookReceiveEvent() 會把 _debugHook 設回 null,而它是 Lua 可呼叫的 ——
+        // SND 的巨集跑在自己的工作執行緒,這個 detour 卻在 UI 執行緒,兩者是真的會撞上的跨執行緒窗口。
+        // 所以欄位只讀一次、快照到區域變數,之後只用區域變數,不對欄位做第二次讀取。
+        var hook = _debugHook;
+
         Svc.Log.Info($"[DebugHook] addon={thisPtr->NameString} type={eventType} which={which}");
-        _debugHook!.Original(thisPtr, eventType, which, atkEvent, data);
+
+        // 快照到手是 null ⇒ Dispose() 已經跑完、原始位元組已還原,這次呼叫沒有原始函式可以轉。
+        // (欄位不是 null 但 hook 已 Dispose 的情況由 OriginalDisposeSafe 自己處理,不必另外接。)
+        // ReceiveEvent 是事件監聽,不是寫 [this] 的建構子,略過只會漏掉這一次事件,
+        // 不會留下沒有 vtable 的半初始化物件 ⇒ 這裡用「略過」收尾是安全的。
+        if (hook == null)
+        {
+            Svc.Log.Information("[DebugHook] hook was removed mid-call; skipping the original call for this invocation.");
+            return;
+        }
+
+        hook.OriginalDisposeSafe(thisPtr, eventType, which, atkEvent, data);
     }
 
     [LuaFunction] public AddonWrapper GetAddon(string name) => new(name);
@@ -54,14 +70,82 @@ public unsafe class AddonModule : LuaModuleBase
     public List<string> GetVisibleAddonNames()
     {
         var names = new List<string>();
+
+        // RaptureAtkUnitManager.Instance() 是 CS 裡少數手寫的實作,逐字是
+        //   var raptureAtkModule = RaptureAtkModule.Instance();
+        //   return raptureAtkModule == null ? null : &raptureAtkModule->RaptureAtkUnitManager;
+        // ⇒ UIModule / RaptureAtkModule 還沒建立時(未登入、還在標題畫面)它回 null,
+        // 而 AllLoadedUnitsList 是 +0x6900 的內嵌欄位 —— 對 null 讀 Count 直接就是 AVE,
+        // 那是 corrupted-state exception,try/catch 攔不到。
+        // 這是使用者明確呼叫的診斷函式(不是輪詢型存取子),安靜回空清單會讓人以為
+        // 「真的一個 addon 都沒有」,所以照本外掛既有慣例記一行錯誤再回空清單。
         var manager = RaptureAtkUnitManager.Instance();
-        for (var i = 0; i < manager->AllLoadedUnitsList.Count; i++)
+        if (manager == null)
+        {
+            FrameworkLogger.Error("Addon list is unavailable (UI module not ready)");
+            return names;
+        }
+
+        // 📌 Count 是**遊戲寫入**的 ushort,而 Entries 是 FixedSizeArray256(產生器出來的是 Span)——
+        //    兩者之間沒有任何結構保證。Count > 256 時的失敗形式是 IndexOutOfRangeException
+        //    而不是 AVE(Span 的索引有邊界檢查),但那仍然會把這個使用者呼叫的函式整個炸掉,
+        //    所以夾到容量內:越界時安靜少讀,並記一行 Information 讓使用者回報得出來。
+        var unitCount = Math.Min((int)manager->AllLoadedUnitsList.Count, manager->AllLoadedUnitsList.Entries.Length);
+        if (unitCount < manager->AllLoadedUnitsList.Count)
+            FrameworkLogger.Info($"AllLoadedUnitsList.Count={manager->AllLoadedUnitsList.Count} exceeds Entries capacity {manager->AllLoadedUnitsList.Entries.Length}; clamped");
+        for (var i = 0; i < unitCount; i++)
         {
             var unit = manager->AllLoadedUnitsList.Entries[i].Value;
             if (unit != null && unit->IsVisible)
                 names.Add(unit->NameString);
         }
         return names;
+    }
+
+    // ── 雇員清單 ──────────────────────────────────────────────────────────
+    // 🔴 RetainerList 的選取事件不是「送一個整數」那麼單純:遊戲要的是
+    //    (int 2, uint index, 未定義值, 未定義值),其中後兩個是 Type = 0 的 AtkValue。
+    //    巨集的 /callback 只能送出整數/字串,寫不出「未定義」這種型別,照著索引硬送會變成
+    //    另一組參數 —— 而 addon 對參數型別不對的反應是靜默不動作,不是報錯。
+    // 🔴 而且 Retainers 永遠是**固定 10 格**,沒用到的格子照樣有 Entry,名字讀到的是空字串或
+    //    殘留值。所以「第 N 個雇員」必須以 IsActive 過濾之後再算,不能直接拿 addon 的槽位當序號。
+    // 這兩件事都已經在 ECommons 的 AddonMaster.RetainerList 裡處理好(AutoRetainer 正式流程走的
+    // 就是它),這裡直接用它,不要在 Lua 端重新發明。
+
+    [LuaFunction(description: "Names of the retainers in the open RetainerList addon, in list order, with the addon's unused fixed slots filtered out. Returns an empty list if the addon is not open or ready.")]
+    public List<string> GetRetainerEntryNames()
+    {
+        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName("RetainerList").Address;
+        if (addon == null || !IsAddonReady(addon))
+            return [];
+
+        var names = new List<string>();
+        foreach (var entry in new AddonMaster.RetainerList((nint)addon).Retainers)
+        {
+            if (!entry.IsActive) continue;
+            names.Add(entry.Name);
+        }
+        return names;
+    }
+
+    [LuaFunction(description: "Selects the named retainer in the open RetainerList addon, using the game's own entry activation. Returns false (and does nothing) if the addon is not open/ready or no active entry carries that name - match is exact.")]
+    public bool SelectRetainerEntryByName(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return false;
+
+        var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName("RetainerList").Address;
+        if (addon == null || !IsAddonReady(addon))
+            return false;
+
+        foreach (var entry in new AddonMaster.RetainerList((nint)addon).Retainers)
+        {
+            // IsActive 要先驗:Select() 對未使用的格子是 no-op 回 false,但名字比對本身會讀到殘留值。
+            if (!entry.IsActive) continue;
+            if (entry.Name != name) continue;
+            return entry.Select();
+        }
+        return false;
     }
 
     [LuaFunction(description: "If the ContextMenu addon is open, selects the entry whose text matches the given label. Returns true if selected.")]

@@ -27,6 +27,19 @@
     不會讓 HousingGardening 視窗跳出來——這種情況要重新互動確認目前狀態，不能直接判定失敗。
 
 單一物件處理中途卡住（互動失敗、逾時等）會整個重試一次，而不是直接放棄跳下一個。
+
+【與 TC Toolbox 的關係】（2026-07-30 更新）
+先前因為「TC Toolbox 只認庭院地壟、改過去會失去花盆支援」而維持純原生實作；
+TC Toolbox 已於 2026-07-30 補上室內園藝花盆支援，涵蓋範圍不再落後，因此本腳本
+改為「有裝就委派、沒裝就原生」的雙路徑：
+  * 偵測到 TC Toolbox 且其「自動園圃作業」模組已啟用 → 互動與選單操作全部委派，
+    本腳本只負責決策（要不要收、要不要施肥、是不是目標作物）。
+  * 偵測不到（沒裝／模組沒開／版本不符）→ 原封不動走下面的原生實作，
+    行為與過去完全一致。偵測全程包在 pcall 裡，不會讓巨集中斷。
+涵蓋範圍差異（已查證）：TC Toolbox 的花盆清單由 HousingFurniture 表推導
+（UsageType 11／CustomTalk 721227＝海濱／林間／綠洲花盆），比本腳本的
+「花盆結尾」名稱比對更精準——南瓜花盆之類純裝飾的花盆本來就不能種東西。
+另外台服並不存在名為「花圃」的道具，下面的花圃比對是無效分支（留著無害）。
 ]]
 
 local TARGET_PLANT_NAME = "虛無界風茄" -- 只收穫並重新種植這個作物，其他成熟作物一律跳過不動
@@ -445,29 +458,230 @@ local function tendOnePlot(entity)
     return "failed"
 end
 
-local plots = findNearbyPlots()
-Dalamud.Log(string.format("找到 %d 個附近的種植物件", #plots))
+--============================================================================
+-- TC Toolbox 委派路徑（有裝且已啟用「自動園圃作業」模組時自動採用）
+--
+-- 2026-07-30 起 TC Toolbox 也支援室內園藝花盆（海濱／林間／綠洲花盆），涵蓋範圍
+-- 已不輸本腳本的名稱比對，所以可以整段委派出去，互動與選單全部交給它。
+-- 上面的原生實作原封不動保留，偵測不到就自動退回，行為與過去完全一致。
+--
+-- 決策仍在本腳本：TC Toolbox 只知道「這格現在能做什麼」，不知道種的是哪種作物，
+-- 所以「只收虛無界風茄」還是靠系統訊息判斷——它的 Scan 會觸發同一則訊息，
+-- 兩邊資訊是同一次互動取得的，不會多花互動次數。
+--============================================================================
+local USE_TCTOOLBOX = true -- 設 false 可強制走原生實作
 
+local function tcbCall(fn, ...)
+    local ok, result = pcall(fn, ...)
+    if not ok then
+        Dalamud.LogDebug("TCToolbox IPC 呼叫失敗：" .. tostring(result))
+        return false, nil
+    end
+    return true, result
+end
+
+local function detectTCToolbox()
+    if not USE_TCTOOLBOX then return false end
+    local ok, installed = tcbCall(function() return IPC.IsInstalled("TCToolbox") end)
+    if not ok or not installed then
+        Dalamud.Log("未偵測到 TC Toolbox，走原生實作")
+        return false
+    end
+    local okAvail, available = tcbCall(function() return IPC.TCToolbox.IsAvailable() end)
+    if not okAvail then
+        Dalamud.Log("TC Toolbox 已安裝但 IPC 無法呼叫（版本不符？），走原生實作")
+        return false
+    end
+    if not available then
+        local _, reason = tcbCall(function() return IPC.TCToolbox.GetUnavailableReason() end)
+        Dalamud.Log("TC Toolbox 目前不可用（" .. tostring(reason) .. "），走原生實作")
+        return false
+    end
+    Dalamud.Log("已接上 TC Toolbox 園圃 IPC，改由它執行互動")
+    return true
+end
+
+-- 由背包裡的道具反查 ItemId（TC Toolbox 的 IPC 吃 ItemId，本腳本的設定是名稱）
+local function itemIdByName(name)
+    local item = findItemByName(name)
+    return item ~= nil and item.ItemId or nil
+end
+
+local function tcbWaitIdle(timeoutMs)
+    local waited = 0
+    while waited < timeoutMs do
+        local ok, busy = tcbCall(function() return IPC.TCToolbox.IsBusy() end)
+        if not ok then return false end
+        if not busy then return true end
+        yield("/wait 0.15")
+        waited = waited + 150
+    end
+    Dalamud.Log("等待 TC Toolbox 動作逾時，主動要求停止")
+    tcbCall(function() IPC.TCToolbox.Stop() end)
+    return false
+end
+
+-- 排入一個動作並等它跑完。回傳 ok, 失敗原因
+local function tcbRun(fn, ...)
+    local ok, reason = tcbCall(fn, ...)
+    if not ok then return false, "IPC 呼叫失敗" end
+    if reason ~= nil and reason ~= "" then return false, tostring(reason) end
+    if not tcbWaitIdle(20000) then return false, "逾時" end
+    return true, nil
+end
+
+local function tendOnePlotTCB(patchId, seedId, soilId, fertId)
+    Chat.ClearLastMessage()
+    local ok, why = tcbRun(IPC.TCToolbox.Scan, patchId)
+    if not ok then
+        Dalamud.Log("掃描失敗（" .. tostring(why) .. "）")
+        return "failed"
+    end
+
+    local statusMsg = Chat.GetLastSystemMessage() or ""
+    local _, state = tcbCall(function() return IPC.TCToolbox.GetPatchState(patchId) end)
+    state = state or "unknown"
+    local status = classifyStatus(statusMsg)
+    Dalamud.LogDebug(string.format("TCB 狀態=[%s] 訊息=[%s] 判讀=[%s]", tostring(state), statusMsg, tostring(status)))
+
+    if status == WITHERED_TEXT then
+        Dalamud.Log("已經枯萎了，跳過，需要人工處理")
+        return "withered"
+    end
+
+    if state == "empty" then
+        Dalamud.Log("空盆，嘗試播種 " .. SEED_ITEM_NAME)
+        local okPlant, why2 = tcbRun(IPC.TCToolbox.Plant, patchId, seedId, soilId)
+        if not okPlant then
+            Dalamud.Log("播種失敗：" .. tostring(why2))
+            return "skipped" -- 空盆播種失敗不重試（可能單純缺料）
+        end
+        return "sown"
+    end
+
+    if state == "mature" then
+        if not statusMsg:find(TARGET_PLANT_NAME, 1, true) then
+            Dalamud.LogDebug("已成熟但不是目標作物，跳過：" .. statusMsg)
+            return "skipped"
+        end
+        local okHarvest, why2 = tcbRun(IPC.TCToolbox.Harvest, patchId)
+        if not okHarvest then
+            Dalamud.Log("收穫失敗：" .. tostring(why2))
+            return "failed"
+        end
+        yield("/wait 0.4")
+        local okPlant, why3 = tcbRun(IPC.TCToolbox.Plant, patchId, seedId, soilId)
+        if not okPlant then
+            Dalamud.Log("收穫成功但重種失敗：" .. tostring(why3))
+        end
+        return "harvested"
+    end
+
+    if state == "growing" then
+        local isTarget = statusMsg:find(TARGET_PLANT_NAME, 1, true) ~= nil
+
+        if status == NEEDS_CARE_TEXT then
+            Dalamud.LogDebug("狀態不太好，先護理")
+            local okTend = tcbRun(IPC.TCToolbox.Tend, patchId)
+            if not okTend then return "failed" end
+            if fertId ~= nil and not isTarget then
+                tcbRun(IPC.TCToolbox.Fertilize, patchId, fertId)
+            end
+            return "cared"
+        end
+
+        -- 目標作物種植後不施肥（與原生實作同一套策略）
+        if isTarget then
+            Dalamud.LogDebug(TARGET_PLANT_NAME .. " 種植後不施肥，跳過")
+            return "skipped"
+        end
+        if fertId == nil then return "skipped" end
+
+        local okFert = tcbRun(IPC.TCToolbox.Fertilize, patchId, fertId)
+        return okFert and "fertilized" or "skipped"
+    end
+
+    Dalamud.Log(string.format("未知狀態（TCB=%s 訊息=[%s]），跳過，請回報這則訊息內容", tostring(state), statusMsg))
+    return "unknown"
+end
+
+local function tendOnePlotTCBWithRetry(patchId, seedId, soilId, fertId)
+    for attempt = 1, RETRY_COUNT + 1 do
+        local category = tendOnePlotTCB(patchId, seedId, soilId, fertId)
+        if category ~= "failed" then return category end
+        if attempt <= RETRY_COUNT then
+            Dalamud.Log(string.format("這個物件處理失敗，重試第 %d 次", attempt))
+            yield("/wait 0.5")
+        else
+            Dalamud.Log("重試後仍然失敗，放棄這個物件，繼續下一個")
+        end
+    end
+    return "failed"
+end
+
+--============================================================================
+-- 主流程
+--============================================================================
 local summary = {
     harvested = 0, fertilized = 0, cared = 0, sown = 0,
     skipped = 0, withered = 0, unknown = 0, failed = 0,
 }
+local total = 0
+local useTcb = detectTCToolbox()
 
-for i, plot in ipairs(plots) do
-    Dalamud.Log(string.format("正在照料第 %d/%d 個種植物件", i, #plots))
-    local category = tendOnePlot(plot)
-    Dalamud.Log(string.format("第 %d/%d 個種植物件處理結果：%s", i, #plots, category))
-    summary[category] = (summary[category] or 0) + 1
-    -- 種植後（播種/收穫重種）跟下一個點互動前多留 500ms，避免動畫/狀態還沒更新完就互動
-    local nextDelay = (category == "sown" or category == "harvested") and 0.65 or 0.15
-    yield("/wait " .. nextDelay)
+if useTcb then
+    -- TC Toolbox 的 IPC 吃 ItemId，先由背包反查（種子與土壤缺一不可）
+    local seedId = itemIdByName(SEED_ITEM_NAME)
+    local soilId = itemIdByName(SOIL_ITEM_NAME)
+    local fertId = itemIdByName(FERTILIZER_ITEM_LABEL) -- 沒有就不施肥，不算錯誤
+    if seedId == nil or soilId == nil then
+        Dalamud.Log("背包裡找不到種子或土壤，改走原生實作（它會逐格提示缺料）")
+        useTcb = false
+    else
+        local okList, patches = tcbCall(function() return IPC.TCToolbox.GetNearbyPatches() end)
+        if not okList or patches == nil or patches.Count == 0 then
+            Dalamud.Log("TC Toolbox 找不到附近的地壟或花盆，改走原生實作")
+            useTcb = false
+        else
+            total = patches.Count
+            Dalamud.Log(string.format("找到 %d 個種植物件（TC Toolbox 路徑）", total))
+            for i = 0, total - 1 do
+                local patchId = patches[i]
+                local _, kind = tcbCall(function() return IPC.TCToolbox.GetPatchKind(patchId) end)
+                Dalamud.Log(string.format("正在照料第 %d/%d 個種植物件（%s）", i + 1, total,
+                    kind == "pot" and "花盆" or "地壟"))
+                local category = tendOnePlotTCBWithRetry(patchId, seedId, soilId, fertId)
+                Dalamud.Log(string.format("第 %d/%d 個種植物件處理結果：%s", i + 1, total, category))
+                summary[category] = (summary[category] or 0) + 1
+                local nextDelay = (category == "sown" or category == "harvested") and 0.65 or 0.15
+                yield("/wait " .. nextDelay)
+            end
+        end
+    end
+end
+
+if not useTcb then
+    local plots = findNearbyPlots()
+    total = #plots
+    Dalamud.Log(string.format("找到 %d 個附近的種植物件（原生路徑）", total))
+
+    for i, plot in ipairs(plots) do
+        Dalamud.Log(string.format("正在照料第 %d/%d 個種植物件", i, total))
+        local category = tendOnePlot(plot)
+        Dalamud.Log(string.format("第 %d/%d 個種植物件處理結果：%s", i, total, category))
+        summary[category] = (summary[category] or 0) + 1
+        -- 種植後（播種/收穫重種）跟下一個點互動前多留 500ms，避免動畫/狀態還沒更新完就互動
+        local nextDelay = (category == "sown" or category == "harvested") and 0.65 or 0.15
+        yield("/wait " .. nextDelay)
+    end
 end
 
 Dalamud.Log("所有附近種植物件處理完畢。")
 
 local report = string.format(
-    "庭院整理完畢，共 %d 個物件：收穫重種 %d、施肥 %d、護理 %d、播種 %d、跳過 %d、枯萎待處理 %d、未知狀態 %d、失敗 %d",
-    #plots, summary.harvested, summary.fertilized, summary.cared, summary.sown,
+    "庭院整理完畢（%s），共 %d 個物件：收穫重種 %d、施肥 %d、護理 %d、播種 %d、跳過 %d、枯萎待處理 %d、未知狀態 %d、失敗 %d",
+    useTcb and "TC Toolbox" or "原生",
+    total, summary.harvested, summary.fertilized, summary.cared, summary.sown,
     summary.skipped, summary.withered, summary.unknown, summary.failed)
 Dalamud.Log(report)
 yield("/echo " .. report)

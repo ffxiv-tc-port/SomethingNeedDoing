@@ -406,6 +406,30 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     public void InvalidateFunctionCache(string macroId) => _cachedFunctionNames.Remove(macroId, out _);
 
     /// <inheritdoc/>
+    public void UnregisterDeletedMacro(IMacro macro)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+
+        if (_macroStates.ContainsKey(macro.Id))
+            StopMacro(macro.Id);
+
+        // Unsubscribe using the same paths used to subscribe, so any per-trigger-type
+        // side effects (AutoRetainer API disposal, addon listener removal, etc.) unwind too.
+        foreach (var triggerEvent in macro.Metadata.TriggerEvents.ToList())
+            UnsubscribeFromTriggerEvent(macro, triggerEvent);
+
+        // Safety net for any registration not reflected in current metadata (e.g. stale from a prior edit).
+        _triggerEventManager.UnregisterAllTriggers(macro);
+        UnregisterFunctionTriggers(macro);
+
+        macro.ContentChanged -= OnMacroContentChanged;
+
+        CleanupMacro(macro.Id);
+
+        FrameworkLogger.Debug($"Unregistered triggers and cleaned up deleted macro {macro.Name} ({macro.Id})");
+    }
+
+    /// <inheritdoc/>
     public void StopAllMacros() => _enginesByMacroId.Keys.Each(StopMacro);
 
     /// <inheritdoc/>
@@ -601,6 +625,14 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     {
         if (sender is IMacro macro)
         {
+            if (macro is ConfigMacro && C.GetMacro(macro.Id) is null) // orphaned ConfigMacro
+            {
+                // don't run triggers for orphaned macros, unregister them
+                FrameworkLogger.Warning($"Skipping trigger event {e.EventType} for deleted macro {macro.Name} ({macro.Id}); unregistering orphaned triggers");
+                _triggerEventManager.UnregisterAllTriggers(macro);
+                return;
+            }
+
             if (_macroStates.ContainsKey(macro.Id))
             {
                 FrameworkLogger.Debug($"Skipping trigger event for macro {macro.Name} - cannot start");
@@ -799,7 +831,7 @@ public class MacroScheduler : IMacroScheduler, IDisposable
 
     private void CheckCharacterPostProcess(IMacro macro)
     {
-        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.ClientState.LocalContentId))
+        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == SvcEx.PlayerState.ContentId))
             FrameworkLogger.Info($"Skipping post process macro {macro.Name} for current character.");
         else
             _arApis[macro.Id].RequestCharacterPostprocess();
@@ -807,14 +839,14 @@ public class MacroScheduler : IMacroScheduler, IDisposable
 
     private void DoCharacterPostProcess(IMacro macro)
     {
-        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.ClientState.LocalContentId))
+        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == SvcEx.PlayerState.ContentId))
         {
             FrameworkLogger.Info($"Skipping post process macro {macro.Name} for current character.");
             return;
         }
 
         FrameworkLogger.Info($"Executing post process macro {macro.Name} for current character.");
-        var eventData = new Dictionary<string, object> { { "Id", Svc.ClientState.LocalContentId }, { "Name", Svc.ClientState.LocalPlayer?.Name.TextValue ?? string.Empty } };
+        var eventData = new Dictionary<string, object> { { "Id", SvcEx.PlayerState.ContentId }, { "Name", Svc.Objects.LocalPlayer?.Name.TextValue ?? string.Empty } };
         _ = _triggerEventManager.RaiseTriggerEvent(TriggerEvent.OnAutoRetainerCharacterPostProcess, eventData);
     }
 

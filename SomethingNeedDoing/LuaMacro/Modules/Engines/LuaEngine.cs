@@ -29,7 +29,7 @@ public class LuaEngine : IEngine
     {
         try
         {
-            var tempMacro = new TemporaryMacro(content);
+            var tempMacro = new TemporaryMacro(content) { Type = MacroType.Lua };
             await _luaEngine.StartMacro(tempMacro, cancellationToken);
         }
         catch (Exception ex)

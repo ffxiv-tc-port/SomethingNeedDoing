@@ -52,21 +52,50 @@ public class EquipItemCommand(string text, uint itemId) : MacroCommandBase(text)
 
         if (pos == null)
         {
-            FrameworkLogger.Error($"Failed to find item {GetRow<Sheets.Item>(itemId)!.Value.Name} (ID: {itemId}) in inventory");
+            // 這行本身就在「找不到道具」的錯誤回報路徑上。itemId 來自巨集參數,超出 Item 表範圍時
+            // GetRow 回 null,原本的 !.Value 會讓錯誤訊息自己先擲 InvalidOperationException——
+            // 真正要回報的錯誤(道具不在背包裡)反而被蓋掉。查不到名字就退回 #<id> 這個字面替代名。
+            var itemName = GetRow<Sheets.Item>(itemId)?.Name.ToString() ?? $"#{itemId}";
+            FrameworkLogger.Error($"Failed to find item {itemName} (ID: {itemId}) in inventory");
             return;
         }
 
         var agentId = IsArmoryInventory(pos.Value.inv) ?
             AgentId.ArmouryBoard : AgentId.Inventory;
 
-        var addonId = AgentModule.Instance()->GetAgentByInternalId(agentId)->GetAddonId();
+        // 三層都合法會回 null,而且每一層都要分開判:
+        //  - AgentModule.Instance() 手寫成 `uiModule == null ? null : uiModule->GetAgentModule()`
+        //  - GetAgentByInternalId() 對尚未建立的代理人回 null
+        //  - AgentInventoryContext.Instance() 是 [Agent] 產生器版(同樣帶 `== null ? null :`)
+        // 任一層解參考 null 都是 AccessViolation,而 AVE 在 .NET Core 是 corrupted-state
+        // exception,try/catch(包含巨集引擎自己的例外處理)完全攔不到。
+        // 照同檔上方「找不到道具」的既有慣例:記一行錯誤後放棄這次 /equip,不擲例外。
+        var agentModule = AgentModule.Instance();
+        var inventoryAgent = agentModule is null ? null : agentModule->GetAgentByInternalId(agentId);
         var ctx = AgentInventoryContext.Instance();
+        if (inventoryAgent is null || ctx is null)
+        {
+            FrameworkLogger.Error($"Cannot equip item #{itemId}: inventory agents are unavailable (not logged in?)");
+            return;
+        }
+
+        var addonId = inventoryAgent->GetAddonId();
         ctx->OpenForItemSlot(pos.Value.inv, pos.Value.slot, 0, addonId);
 
         var contextMenu = (AtkUnitBase*)Svc.GameGui.GetAddonByName("ContextMenu").Address;
         if (contextMenu != null)
         {
-            for (var i = 0; i < contextMenu->AtkValuesCount; i++)
+            // AtkValuesCount 是 ContextMenu 這個 addon 的 AtkValues 陣列長度,跟 agent 的
+            // _eventIds(FixedSizeArray84<byte>,84 格)是兩個不相干的長度。拿前者當後者的
+            // 迴圈上界,只要選單的 AtkValuesCount 超過 84 就會丟 IndexOutOfRangeException
+            // (產生器產出的是 Span<byte>,有邊界檢查,所以不會 AVE,但 /equip 會靜默失效)。
+            // 取兩者較小值,索引的上下界都要驗。
+            var entryCount = System.Math.Min(contextMenu->AtkValuesCount, ctx->EventIds.Length);
+
+            // 第 n 個選單項對應的事件編號是 7+n,所以 i<7 沒有對應的選單列;
+            // 那種情況下 i-7 會是負數,而 p2=-1 對選單的語意是「關閉」——
+            // 送出去等於在還沒找到裝備選項時就把選單關掉。
+            for (var i = 7; i < entryCount; i++)
             {
                 var firstEntryIsEquip = ctx->EventIds[i] == 25;
                 if (firstEntryIsEquip)
