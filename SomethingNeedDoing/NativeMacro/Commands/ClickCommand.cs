@@ -31,6 +31,22 @@ public class ClickCommand(string text, string addonName, string methodName, stri
             {
                 if (!TryGetAddonByName<AtkUnitBase>(addonName, out var addon))
                     throw new MacroException($"Addon {addonName} not found");
+
+                // 與 /callback 同一道閘門(CallbackCommand 用的也是 GenericHelpers.IsAddonReady):
+                // 不 ready 就整段跳過而不擲例外 —— 巨集指令之間沒有預設等待,擲例外會在視窗還沒開的
+                // 那一瞬間把整支巨集中止。
+                //
+                // 這道閘門裡真正證得出東西的是 IsVisible,而它的方向是不對稱的:
+                //   IsVisible == false ⇒ 這扇窗必定已經被 Close 或 Hide 過(Hide 會同步清掉該位元,
+                //                        而 Close 只有在「本來就不可見」時才跳過 Hide)⇒ 不要按。
+                //   IsVisible == true  ⇒ 證明不了它還開著。
+                // ⇒ 這是硬擋,不是安全保證:「按到正在關閉中的窗」仍然擋不掉。
+                if (!IsAddonReady(addon))
+                {
+                    FrameworkLogger.Info($"Skipping click on {addonName}: addon is not ready (hidden, closing or still loading)");
+                    return;
+                }
+
                 var type = typeof(AddonMaster).GetNestedType(addonName) ?? throw new NullReferenceException($"Type {addonName} not found");
                 var m = Activator.CreateInstance(type, [(nint)addon]) ?? throw new InvalidOperationException($"Could not create instance of type {type}");
                 if (methodName.Contains('.'))
