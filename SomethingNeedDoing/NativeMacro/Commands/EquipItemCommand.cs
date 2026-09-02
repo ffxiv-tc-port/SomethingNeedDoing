@@ -95,16 +95,45 @@ public class EquipItemCommand(string text, uint itemId) : MacroCommandBase(text)
             // 第 n 個選單項對應的事件編號是 7+n,所以 i<7 沒有對應的選單列;
             // 那種情況下 i-7 會是負數,而 p2=-1 對選單的語意是「關閉」——
             // 送出去等於在還沒找到裝備選項時就把選單關掉。
+            // 🔴🔴 一次 /equip 對同一扇選單最多只能送「一發」close:true 的 callback。
+            // ECommons `Callback.Fire(base, updateState, …)` 的 updateState 就是原生
+            // AtkUnitBase::FireCallback 的 close 參數。台服 7.20 反組譯(FireCallback = 0x1406422B0):
+            // close 為真且處理常式回非零時,原生會在**回到這段 C# 之前**於同一個呼叫堆疊內
+            // 跑完 vf6 Hide + vf4 Close。也就是說送出裝備那一發之後,contextMenu 這個指標
+            // 隨時可能已經失效,而對失效的原生指標再開火是攔不到的存取違規
+            // (AVE 在 .NET Core 是 corrupted-state exception,try/catch 完全無效)。
+            // 原本的碼迴圈裡沒有 break、迴圈後又無條件再送一發關閉,兩處都踩在這條線上。
+            //
+            // ⚠️ 不能靠「再 GetAddonByName 解一次位址」當守衛:台服
+            //    AtkUnitManager::GetAddonByName(0x14064B960)查的是 AllLoadedUnitsList(管理器 +0x6900),
+            //    而 AtkUnitBase::Close(0x14063CFE0)只把窗從 UnitList16(+0x7920)移除、完全不動那張表
+            //    ⇒ 關掉之後照樣解得到同一個位址,守衛等於不存在。再加 IsVisible/IsReady 也不夠
+            //    (艦隊已有「三關全過但 FireCallback 仍 AVE」的實例)。
+            // ⇒ 唯一能離線證明安全的做法就是「送過就再也不碰它」。
+            var equipCallbackSent = false;
             for (var i = 7; i < entryCount; i++)
             {
                 var firstEntryIsEquip = ctx->EventIds[i] == 25;
                 if (firstEntryIsEquip)
                 {
-                    FrameworkLogger.Debug($"Equipping item #{itemId} from {pos.Value.inv} @ {pos.Value.slot}, index {i}");
+                    FrameworkLogger.Debug($"/equip: sending equip callback for item #{itemId} from {pos.Value.inv} @ {pos.Value.slot}, index {i}");
                     Callback.Fire(contextMenu, true, 0, i - 7, 0, 0, 0);
+                    equipCallbackSent = true;
+                    // 送出的那一刻 contextMenu 就可能已經失效,迴圈不可以再跑下一輪。
+                    break;
                 }
             }
-            Callback.Fire(contextMenu, true, 0, -1, 0, 0, 0);
+
+            if (equipCallbackSent)
+            {
+                FrameworkLogger.Debug("/equip: the equip callback already closed the context menu; skipping the redundant close callback");
+            }
+            else
+            {
+                // 走到這裡代表上面一發都沒送出去 ⇒ 這扇選單還是幾行前才剛解出來的那一扇,
+                // 中間沒有任何原生程式碼碰過它,送 p2=-1(關閉)是安全的。
+                Callback.Fire(contextMenu, true, 0, -1, 0, 0, 0);
+            }
             EquipAttemptLoops++;
 
             if (EquipAttemptLoops >= 5)
