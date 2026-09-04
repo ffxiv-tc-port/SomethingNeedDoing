@@ -39,12 +39,24 @@ public class YesAlready : IPC, IDisableable, IDisposable
     /// <summary>租約登記的名字，會出現在 YesAlready 的 log 與設定視窗。</summary>
     private const string LeaseOwner = "SomethingNeedDoing";
 
-    /// <summary>每次取得／續約要求的租期；提供端硬性上限就是 60 分鐘，直接要滿。</summary>
-    /// <remarks>🔑 續約只當保險：續約整條路壞掉時仍有一小時緩衝，而不是 10 分鐘就醒過來。</remarks>
-    private const int LeaseMilliseconds = 3_600_000;
+    /// <summary>每次取得／續約要求的租期（5 分鐘）＝提供端的硬性上限。</summary>
+    /// <remarks>
+    /// 🔑 全艦隊的壓制租約時間政策統一成「租 5 分鐘、每 30 秒續約」（AutoRetainer 那套
+    /// 本來就是這個值）。取捨是：租期短 ⇒ 我們當掉或被卸載時，使用者最多等 5 分鐘
+    /// YesAlready 就自己恢復；心跳間隔留 10 倍餘裕 ⇒ 要連續漏掉 9 次心跳才會真的過期。
+    /// <para>
+    /// 🔴 這個值<b>不可以</b>大於提供端的上限：提供端是<b>夾值不是拒絕</b>，要多了只會
+    /// 被靜默砍短，心跳反而會來不及。
+    /// </para>
+    /// </remarks>
+    private const int LeaseMilliseconds = 300_000;
 
-    /// <summary>心跳間隔（5 分鐘），遠小於 <see cref="LeaseMilliseconds"/>。</summary>
-    private const int RenewIntervalMilliseconds = 300_000;
+    /// <summary>心跳間隔（30 秒），是 <see cref="LeaseMilliseconds"/> 的十分之一。</summary>
+    /// <remarks>
+    /// 📌 <see cref="Timer"/> 的 dueTime 與 period <b>都</b>用這個常數
+    /// （<see cref="TryAcquireLease"/> 裡唯一一處 <c>new Timer(...)</c>），沒有另外寫死的值。
+    /// </remarks>
+    private const int RenewIntervalMilliseconds = 30_000;
 
     private readonly object _gate = new();
 
@@ -224,7 +236,7 @@ public class YesAlready : IPC, IDisableable, IDisposable
     }
 
     /// <summary>
-    /// 心跳：巨集可以跑好幾個小時，而租約上限只有 60 分鐘。
+    /// 心跳：巨集可以跑好幾個小時，而租約上限只有 5 分鐘。
     /// </summary>
     /// <remarks>
     /// 🔴 <b>續約回 <see langword="false"/> 代表那把已經不在了</b>（逾時、YesAlready 被重載、
@@ -267,7 +279,7 @@ public class YesAlready : IPC, IDisableable, IDisposable
                 // 落到下面停掉心跳。
             }
 
-            // 重新取得也失敗（YesAlready 被卸載了？）：停掉心跳，別讓它每 5 分鐘空轉一次。
+            // 重新取得也失敗（YesAlready 被卸載了？）：停掉心跳，別讓它每 30 秒空轉一次。
             // 計數仍然留著，下一支巨集的 DisableAsync 會再試一次。
             FrameworkLogger.Info("重新取得 YesAlready 壓制租約失敗，停止續約心跳");
             StopHeartbeat();
