@@ -7,7 +7,7 @@ namespace SomethingNeedDoing.External;
 public class BossMod : IPC
 {
     public override string Name => "BossMod";
-    public override string Repo => Repos.Veyn;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC("Presets.%m", true)]
     [LuaFunction(

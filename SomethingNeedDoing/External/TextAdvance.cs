@@ -6,7 +6,7 @@ namespace SomethingNeedDoing.External;
 public class TextAdvance : IPC, IDisableable
 {
     public override string Name => "TextAdvance";
-    public override string Repo => Repos.Limiana;
+    public override string Repo => Repos.TcPort;
     public string InternalName => Name;
 
     [EzIPC]

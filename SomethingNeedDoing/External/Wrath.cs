@@ -5,7 +5,7 @@ namespace SomethingNeedDoing.External;
 public class Wrath : IPC
 {
     public override string Name => "WrathCombo";
-    public override string Repo => Repos.Punish;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(

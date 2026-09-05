@@ -9,7 +9,7 @@ namespace SomethingNeedDoing.External;
 public class AutoRetainer : IPC
 {
     public override string Name => "AutoRetainer";
-    public override string Repo => Repos.Punish;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(description: "Gets whether multi-mode is enabled")]

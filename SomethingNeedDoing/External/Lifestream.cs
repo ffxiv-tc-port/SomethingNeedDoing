@@ -5,7 +5,7 @@ namespace SomethingNeedDoing.External;
 public class Lifestream : IPC
 {
     public override string Name => "Lifestream";
-    public override string Repo => Repos.Limiana;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(

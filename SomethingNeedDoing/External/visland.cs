@@ -5,7 +5,7 @@ namespace SomethingNeedDoing.External;
 public class Visland : IPC
 {
     public override string Name => "visland";
-    public override string Repo => Repos.Veyn;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(description: "Checks if a route is currently running")]

@@ -25,11 +25,20 @@ public abstract class IPC : IIPC
     public bool IsInstalled => Svc.PluginInterface.InstalledPlugins.Any(p => (p.Name == Name || p.InternalName == Name) && p.IsLoaded);
     public IPC() => EzIPC.Init(this, Name);
 
+    /// <summary>
+    /// 每個 IPC 類別的 <see cref="IIPC.Repo"/> 要填的外掛庫網址。
+    /// 🔴 台服艦隊有移植版的一律填 <see cref="TcPort"/>：國際服那些庫裡的外掛內部名與台服版
+    ///    完全相同，使用者照著加進去會裝到 API15/net10 的版本，在台服的 API13 Dalamud 上載不
+    ///    起來，而且會撞掉同一個已安裝鍵。下面剩下的國際服常數只給「台服沒有移植版」的外掛用。
+    /// </summary>
     public class Repos
     {
+        /// <summary>官方（第一方）外掛庫，不必另外加自訂庫。</summary>
         public const string FirstParty = "";
+        /// <summary>台服艦隊的外掛庫。有台服移植版的一律填這個。</summary>
         public const string TcPort = "https://raw.githubusercontent.com/ffxiv-tc-port/DalamudPluginsTC/main/repo.json";
-        public const string Liza = "https://git.carvel.li/liza/";
+        /// <summary>沒有任何可用的安裝來源（原本的來源已經死掉，台服也沒有移植版）。</summary>
+        public const string Unavailable = "";
         public const string Punish = "https://love.puni.sh/ment.json";
         public const string Limiana = "https://github.com/NightmareXIV/MyDalamudPlugins/raw/main/pluginmaster.json";
         public const string Herc = $"{Dynamis}herc";

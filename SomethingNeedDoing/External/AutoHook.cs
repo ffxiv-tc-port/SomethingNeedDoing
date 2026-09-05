@@ -6,7 +6,7 @@ namespace SomethingNeedDoing.External;
 public class AutoHook : IPC
 {
     public override string Name => "AutoHook";
-    public override string Repo => Repos.Punish;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(

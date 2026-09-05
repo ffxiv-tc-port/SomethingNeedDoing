@@ -5,7 +5,7 @@ namespace SomethingNeedDoing.External;
 public class AutoDuty : IPC
 {
     public override string Name => "AutoDuty";
-    public override string Repo => Repos.Herc;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(description: "Opens the list configuration")]

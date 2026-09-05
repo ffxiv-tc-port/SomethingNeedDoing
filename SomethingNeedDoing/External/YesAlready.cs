@@ -70,7 +70,7 @@ public class YesAlready : IPC, IDisableable, IDisposable
     private Timer? _heartbeat;
 
     public override string Name => "YesAlready";
-    public override string Repo => Repos.Punish;
+    public override string Repo => Repos.TcPort;
     public string InternalName => Name;
 
     [EzIPC]
