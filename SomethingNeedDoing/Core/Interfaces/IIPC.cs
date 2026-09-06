@@ -23,7 +23,14 @@ public abstract class IPC : IIPC
     // 但 InstalledPlugins 的 Name 是「顯示名稱」,兩者不一定相同
     // (例如 TCToolbox 的顯示名稱是「TC Toolbox」),因此兩個都比對。
     public bool IsInstalled => Svc.PluginInterface.InstalledPlugins.Any(p => (p.Name == Name || p.InternalName == Name) && p.IsLoaded);
-    public IPC() => EzIPC.Init(this, Name);
+    /// <summary>
+    /// <see cref="EzIPC.Init"/> 回傳的處置權杖。留著是為了能事後檢查「到底註冊/訂閱成功了
+    /// 哪些端點」—— EzIPC 對失敗只寫一行 Error 就繼續跑,不看這個就只能翻 log 用猜的。
+    /// 🔴 不要在這裡 Dispose:整批由 ECommonsMain.Dispose 統一處置。
+    /// </summary>
+    public EzIPCDisposalToken[] IpcTokens { get; }
+
+    public IPC() => IpcTokens = EzIPC.Init(this, Name);
 
     /// <summary>
     /// 每個 IPC 類別的 <see cref="IIPC.Repo"/> 要填的外掛庫網址。
