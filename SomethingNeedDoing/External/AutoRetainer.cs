@@ -171,20 +171,26 @@ public class AutoRetainer : IPC
     [Changelog("12.19")]
     public List<ulong> GetRegisteredCharacters() => StaticsService.AutoRetainerApi.GetRegisteredCharacters();
 
+    // AutoRetainer 那端查不到資料(CID/雇員名不存在)或自己逾時放棄時,這兩個查詢都會回 null。
+    // null 的語意是「不知道」而不是「所有設定都是關的」,所以一律往 Lua 回 nil,不要包成一個
+    // 看起來正常的全預設物件 —— 巨集把那種空殼當成真實設定用(甚至寫回 AutoRetainer)會把
+    // 使用者的雇員設定靜默洗掉。
     [LuaFunction(
-        description: "Gets offline character data for a specific character ID",
+        description: "Gets offline character data for a specific character ID. Returns nil when AutoRetainer has no data for that CID, or when the call timed out. nil means \"unknown\", not \"a character with everything switched off\" - test for nil before indexing the result, and never feed a nil-derived blank back into AutoRetainer.",
         parameterDescriptions: ["cid"])]
     [Changelog("12.19")]
-    public OfflineCharacterDataWrapper GetOfflineCharacterData(ulong cid) => new(StaticsService.AutoRetainerApi.GetOfflineCharacterData(cid));
+    public OfflineCharacterDataWrapper? GetOfflineCharacterData(ulong cid)
+        => StaticsService.AutoRetainerApi.GetOfflineCharacterData(cid) is { } data ? new(data) : null;
 
     // 這是「哪些雇員被使用者掛了設定」的唯一可讀來源。OfflineCharacterData 只有雇員的名字與探險
     // 狀態,使用者在 AutoRetainer 裡對個別雇員做的設定(存放計畫、存入重複品、提金幣…)在另一份
     // AdditionalRetainerData 裡,以 (角色 CID, 雇員名) 為鍵。巨集想「只處理掛了某個存放計畫的雇員」
     // 就得靠它。
     [LuaFunction(
-        description: "Gets AutoRetainer's per-retainer settings (entrust plan, entrust duplicates, gil handling) for one retainer of one character, keyed by character CID and retainer name.",
+        description: "Gets AutoRetainer's per-retainer settings (entrust plan, entrust duplicates, gil handling) for one retainer of one character, keyed by character CID and retainer name. Returns nil when AutoRetainer knows nothing about that character/retainer pair, or when the call timed out. nil means \"unknown\", not \"every setting off\" - test for nil before indexing the result. Do not turn a nil into a default settings object and write it back: that silently resets the user's retainer settings.",
         parameterDescriptions: ["cid", "retainerName"])]
-    public AdditionalRetainerDataWrapper GetAdditionalRetainerData(ulong cid, string retainerName) => new(StaticsService.AutoRetainerApi.GetAdditionalRetainerData(cid, retainerName));
+    public AdditionalRetainerDataWrapper? GetAdditionalRetainerData(ulong cid, string retainerName)
+        => StaticsService.AutoRetainerApi.GetAdditionalRetainerData(cid, retainerName) is { } data ? new(data) : null;
 
     public class AdditionalRetainerDataWrapper(AdditionalRetainerData data) : IWrapper
     {
@@ -208,12 +214,12 @@ public class AutoRetainer : IPC
         [LuaDocs][Changelog("12.19")] public string Name => data.Name;
         [LuaDocs][Changelog("12.19")] public string World => data.World;
         [LuaDocs][Changelog("12.19")] public bool Enabled => data.Enabled;
-        [LuaDocs][Changelog("12.19")] public List<OfflineRetainerDataWrapper> RetainerData => [.. data.RetainerData.Select(x => new OfflineRetainerDataWrapper(x))];
+        [LuaDocs][Changelog("12.19")] public List<OfflineRetainerDataWrapper> RetainerData => data.RetainerData is { } l ? [.. l.Select(x => new OfflineRetainerDataWrapper(x))] : [];
         [LuaDocs][Changelog("12.19")] public uint InventorySpace => data.InventorySpace;
         [LuaDocs][Changelog("12.19")] public uint VentureCoffers => data.VentureCoffers;
         [LuaDocs][Changelog("12.19")] public uint Gil => data.Gil;
-        [LuaDocs][Changelog("12.19")] public List<OfflineVesselDataWrapper> OfflineAirshipData => [.. data.OfflineAirshipData.Select(x => new OfflineVesselDataWrapper(x))];
-        [LuaDocs][Changelog("12.19")] public List<OfflineVesselDataWrapper> OfflineSubmarineData => [.. data.OfflineSubmarineData.Select(x => new OfflineVesselDataWrapper(x))];
+        [LuaDocs][Changelog("12.19")] public List<OfflineVesselDataWrapper> OfflineAirshipData => data.OfflineAirshipData is { } l ? [.. l.Select(x => new OfflineVesselDataWrapper(x))] : [];
+        [LuaDocs][Changelog("12.19")] public List<OfflineVesselDataWrapper> OfflineSubmarineData => data.OfflineSubmarineData is { } l ? [.. l.Select(x => new OfflineVesselDataWrapper(x))] : [];
         [LuaDocs][Changelog("12.19")] public int Ceruleum => data.Ceruleum;
         [LuaDocs][Changelog("12.19")] public int RepairKits => data.RepairKits;
         [LuaDocs][Changelog("12.19")] public bool RetainersAwaitingProcessing => RetainerData.Any(x => x.HasVenture && x.VentureEndsAt <= TimeProvider.System.GetUtcNow().ToUnixTimeSeconds());
