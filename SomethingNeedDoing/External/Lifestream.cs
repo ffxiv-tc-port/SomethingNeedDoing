@@ -37,9 +37,15 @@ public class Lifestream : IPC
     public Action<string, bool, string, bool, int?, bool?, bool?> TPAndChangeWorld = null!;
 
     [EzIPC]
-    [LuaFunction(parameterDescriptions: ["territoryType"])]
+    [LuaFunction(
+        description: "Gets the world-change aetheryte for a territory. Returns nil when that territory has none.",
+        parameterDescriptions: ["territoryType"])]
     [Changelog("12.12")]
-    public Func<int?> GetWorldChangeAetheryteByTerritoryType = null!;
+    // 🔴 提供端是 Func<uint, int?>（Lifestream 的 IPCProvider.GetWorldChangeAetheryteByTerritoryType）。
+    //    這裡以前宣告成零參數的 Func<int?>：Dalamud 的 CallGateChannel.CheckAndConvertArgs 比的是
+    //    委派的參數個數，個數不合就擲 IpcLengthMismatchError ⇒ 這個 Lua 函式從來沒有成功呼叫過。
+    //    查不到乙太之光時提供端回 null，到 Lua 就是 nil。
+    public Func<uint, int?> GetWorldChangeAetheryteByTerritoryType = null!;
 
     [EzIPC]
     [LuaFunction(parameterDescriptions: ["world"])]
