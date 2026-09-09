@@ -11,6 +11,7 @@ using SomethingNeedDoing.LuaMacro;
 using SomethingNeedDoing.LuaMacro.Wrappers;
 using SomethingNeedDoing.NativeMacro;
 using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,6 +35,34 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     private readonly MacroHierarchyManager _hierarchyManager;
 
     private readonly HashSet<string> _functionTriggersRegistered = [];
+
+    /// <summary>
+    /// 上一次向 AutoRetainer 登記「角色後處理」是在哪一次框架更新（<see cref="IFramework.LastUpdateUTC"/>）；
+    /// <c>null</c> 代表還沒登記過。
+    /// </summary>
+    /// <remarks>
+    /// 🔴 AutoRetainer 的登記表是以「外掛名」為鍵的，而這裡是替<b>每一支</b>訂閱了角色後處理的巨集
+    /// 各建一個 <c>AutoRetainerApi</c>，它們的外掛名全都是 SomethingNeedDoing ⇒ AutoRetainer 廣播一次，
+    /// <c>CheckCharacterPostProcess</c> 就會被呼叫 N 次，而第二次之後 AutoRetainer 那側會擲例外
+    /// （那是它刻意的防呆，不動它）。
+    /// 一次登記就足以讓全部巨集都拿到後處理輪次 —— AutoRetainer 回頭也是以外掛名廣播的，
+    /// 所有實例都收得到 —— 所以由消費端這側自己去重，只登記一次。
+    /// <para>
+    /// 🔴 這裡刻意<b>不</b>用 <c>UiBuilder.FrameCount</c> 當去重鍵：那個計數器是在<b>繪製</b>路徑上遞增的，
+    /// 而 Dalamud 的 <c>UiBuilder.OnDraw()</c> 在「遊戲 UI 隱藏」「過場動畫」「GPose」任一成立時會提早 return，
+    /// <c>FrameCount++</c> 寫在那個 return <b>之後</b> ⇒ HUD 藏著跑多角色作業的整段期間它完全凍結，
+    /// 去重鍵永遠是同一個值，第二輪之後會被整輪擋掉而<b>一次都不登記</b>——安靜地不動，比原本吵但會動更糟。
+    /// <c>LastUpdateUTC</c> 是在 Framework.Update 裡無條件更新的，而 AutoRetainer 的廣播本身就是掛在
+    /// 同一個 Framework.Update 上跑的（它的 TaskManager 訂閱 <c>Svc.Framework.Update</c>）⇒ 兩者同源，
+    /// 不可能一邊在廣播、另一邊卻凍結。
+    /// </para>
+    /// <para>
+    /// 型別是可空的 <c>DateTime?</c> 而不是用 <c>DateTime.MinValue</c> 當哨兵：
+    /// <c>IFramework.LastUpdateUTC</c> 自己的初始值就是 <c>DateTime.MinValue</c>，
+    /// 拿它當哨兵會在「框架還沒跑過任何一次更新」時與真實值相撞而把第一次登記也擋掉。
+    /// </para>
+    /// </remarks>
+    private DateTime? _arCharacterPostProcessRequestedTick;
 
     /// <inheritdoc/>
     public event EventHandler<MacroStateChangedEventArgs>? MacroStateChanged;
@@ -904,9 +933,35 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     private void CheckCharacterPostProcess(IMacro macro)
     {
         if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.PlayerState.ContentId))
+        {
             FrameworkLogger.Info($"Skipping post process macro {macro.Name} for current character.");
-        else
+            return;
+        }
+
+        // AutoRetainer 是在同一次框架更新裡把登記表清空、再一口氣「同步」廣播給所有訂閱者的
+        // （TaskPostprocessCharacterIPC 的第一個任務裡 Clear() 之後直接 SendMessage），
+        // 所以「同一次框架更新」正好就是一輪登記的範圍。
+        var tick = Svc.Framework.LastUpdateUTC;
+        if (_arCharacterPostProcessRequestedTick == tick)
+        {
+            FrameworkLogger.Info($"這一輪已經向 AutoRetainer 登記過角色後處理，巨集 {macro.Name} 不再重複登記（一次登記就涵蓋所有已訂閱的巨集，它照樣會被執行）。");
+            return;
+        }
+
+        try
+        {
             _arApis[macro.Id].RequestCharacterPostprocess();
+            _arCharacterPostProcessRequestedTick = tick;
+        }
+        catch (TargetInvocationException ex)
+        {
+            // 🔴 AutoRetainer 的提供端實作自己擲的例外，會被 Dalamud CallGate 的 DynamicInvoke
+            //    包成 TargetInvocationException —— 慣用的 catch (IpcError) 攔不到它。
+            //    這裡只攔這一種（不要裸 catch (Exception)，那會連該炸的東西一起吞掉），
+            //    而且不靜默：登記被拒一定要讓使用者在 log 上看得見。
+            _arCharacterPostProcessRequestedTick = tick;
+            FrameworkLogger.Info($"AutoRetainer 拒絕了巨集 {macro.Name} 的角色後處理登記：{ex.InnerException?.Message ?? ex.Message}。若本外掛這一輪已經登記過，該巨集仍然會被執行。");
+        }
     }
 
     private void DoCharacterPostProcess(IMacro macro)
