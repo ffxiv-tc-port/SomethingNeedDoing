@@ -64,6 +64,24 @@ public class Config
     public bool PropagateControlsToChildren { get; set; } = true;
     public bool HasCompletedTutorial { get; set; } = false;
     public bool AcknowledgedLegacyWarning { get; set; } = false;
+
+    /// <summary>
+    /// 巨集<b>自己跑到結束</b>時，請「塔塔露誇獎」(TataruPraise) 念一句。
+    /// </summary>
+    /// <remarks>
+    /// 📌 預設開著，與艦隊裡其他接了 TataruPraise 的外掛一致。
+    /// 🔴 <b>開著也不會憑空多出聲音</b>：沒安裝 TataruPraise 時整條路徑是安靜的 no-op；
+    /// 裝了的人也要等「巨集完成」這個情境真的合成過語音才會響（那是 TataruPraise 那側的閘門）。
+    /// </remarks>
+    public bool TataruPraiseOnMacroComplete { get; set; } = true;
+
+    /// <summary>
+    /// 巨集<b>因為錯誤而停下來</b>時，請「塔塔露誇獎」念一句（走「需要幫忙」情境，不是「巨集完成」）。
+    /// </summary>
+    /// <remarks>
+    /// 📌 出錯本來就會印一行紅字到聊天視窗，但人不在鍵盤前的時候看不到；這是給那種情況的。
+    /// </remarks>
+    public bool TataruPraiseOnMacroError { get; set; } = true;
     #endregion
 
     #region Crafting Settings

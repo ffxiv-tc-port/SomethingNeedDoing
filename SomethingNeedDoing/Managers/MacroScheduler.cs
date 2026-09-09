@@ -365,6 +365,9 @@ public class MacroScheduler : IMacroScheduler, IDisposable
         if (_macroStates.TryGetValue(macroId, out var state))
         {
             state.CancellationSource.Cancel();
+            // 🔴 必須在改 State 之前設：那個設定子是同步觸發 StateChanged 的，
+            //    設在後面等於 OnMacroStateChanged 讀到 false ⇒ 按停止也會念一句「跑完了」。
+            state.StoppedManually = true;
             state.Macro.State = MacroState.Completed;
 
             // rest of the cleanup will be handled by OnMacroStateChanged
@@ -558,6 +561,22 @@ public class MacroScheduler : IMacroScheduler, IDisposable
         public IMacro Macro { get; } = macro;
         public bool PauseAtLoop { get; set; }
         public bool StopAtLoop { get; set; }
+
+        /// <summary>
+        /// 這支巨集是被<b>使用者按停</b>的（停止鈕、<c>/snd stop</c>、刪掉巨集、全艦隊急停），
+        /// 不是自己跑到結束的。
+        /// </summary>
+        /// <remarks>
+        /// 🔴 只有 <see cref="StopMacro"/> 會設它，而且必須在把 <c>Macro.State</c> 改成
+        /// <c>Completed</c> <b>之前</b>設——那個設定子是<b>同步</b>觸發 <c>StateChanged</c> 的，
+        /// 順序反過來的話 <c>OnMacroStateChanged</c> 讀到的還是 <see langword="false"/>，
+        /// 而失敗形式是「按停止也會念一句『跑完了』」。
+        /// <para>
+        /// 📌 <c>CheckLoopStop</c>／<c>OnLoopControlRequested</c>（「跑完這一圈就停」）刻意<b>不</b>設：
+        /// 那是使用者事先排好的收工方式，對「人不在鍵盤前」來說就是跑完了。
+        /// </para>
+        /// </remarks>
+        public bool StoppedManually { get; set; }
         public CancellationTokenSource CancellationSource { get; } = new CancellationTokenSource();
         public ManualResetEventSlim PauseEvent { get; } = new ManualResetEventSlim(true);
         public Task? ExecutionTask { get; set; }
@@ -601,7 +620,10 @@ public class MacroScheduler : IMacroScheduler, IDisposable
                 temp.StateChanged -= OnMacroStateChanged;
             }
 
-            if (_macroStates.Remove(e.MacroId, out var state))
+            var hadState = _macroStates.Remove(e.MacroId, out var state);
+            var stoppedManually = state?.StoppedManually ?? false;
+            var macroName = state?.Macro.Name;
+            if (hadState && state != null)
             {
                 UnregisterFunctionTriggers(state.Macro);
                 state.CancellationSource.Cancel();
@@ -611,7 +633,57 @@ public class MacroScheduler : IMacroScheduler, IDisposable
             }
 
             _enginesByMacroId.Remove(e.MacroId, out _);
+
+            NotifyTataruPraise(sender, e, hadState, stoppedManually, macroName);
         }
+    }
+
+    /// <summary>
+    /// 巨集結束時請「塔塔露誇獎」念一句。
+    /// </summary>
+    /// <param name="sender">觸發狀態變更的巨集物件。</param>
+    /// <param name="e">狀態變更事件。</param>
+    /// <param name="hadState">這一次狀態變更有沒有真的從 <c>_macroStates</c> 取下一筆執行狀態。</param>
+    /// <param name="stoppedManually">是不是被使用者按停的（見 <c>MacroExecutionState.StoppedManually</c>）。</param>
+    /// <param name="macroName">巨集名稱，只寫進記錄。</param>
+    /// <remarks>
+    /// 🔴 本外掛對「巨集跑完了」<b>沒有任何使用者看得見的輸出</b>（<see cref="MacroStateChanged"/>
+    /// 在整個外掛裡一個訂閱端都沒有），所以掛著巨集離開鍵盤的人根本不知道它結束了。這裡補上聲音。
+    /// <para>
+    /// 🔴 三道閘門，缺一就會變成洗版或報錯事：
+    /// <list type="number">
+    /// <item><b>子巨集不算</b>（<c>sender is TemporaryMacro</c>）：<c>/runmacro</c> 與 Lua 起的子巨集
+    /// 在一支巨集裡可能跑幾十次，各響一次就是洗版；子巨集出錯也已經傳播成母巨集的 <c>Error</c>。</item>
+    /// <item><b>沒取到執行狀態就不算</b>（<paramref name="hadState"/>）：巨集出錯時會先走一次
+    /// <c>Error</c>（那一次把狀態取下來了），接著 <c>RunMacroAsync</c> 收尾又把它設成
+    /// <c>Completed</c> ⇒ <b>同一支巨集會連續來兩個事件</b>。第二次取不到狀態，
+    /// 拿它當去重的判準，才不會出錯之後還念一句「跑完了」。</item>
+    /// <item><b>使用者按停不算</b>（<paramref name="stoppedManually"/>）：那時候人就在鍵盤前面。
+    /// 📌 「跑完這一圈就停」<b>不</b>設這個旗標，它算跑完。</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// 📌 出錯走的是「需要幫忙」情境、不是「巨集完成」——兩件事念同一句話等於沒講。
+    /// ⚠️ 這條路徑常常在<b>執行緒池</b>上（<c>await state.ExecutionTask</c> 之後），
+    /// 排到 framework 執行緒是 <see cref="TataruPraiseIPC"/> 內部做的。
+    /// </para>
+    /// </remarks>
+    private static void NotifyTataruPraise(object? sender, MacroStateChangedEventArgs e, bool hadState, bool stoppedManually, string? macroName)
+    {
+        if (sender is TemporaryMacro) return;
+        if (!hadState) return;
+
+        var name = macroName ?? e.MacroId;
+
+        if (e.NewState == MacroState.Error)
+        {
+            TataruPraiseIPC.TryPraiseMacroError($"巨集「{name}」出錯停下");
+            return;
+        }
+
+        if (stoppedManually) return;
+
+        TataruPraiseIPC.TryPraiseMacroDone($"巨集「{name}」跑完");
     }
 
     private void OnMacroContentChanged(object? sender, MacroContentChangedEventArgs e)

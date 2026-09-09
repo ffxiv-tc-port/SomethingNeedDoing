@@ -82,6 +82,22 @@ public static class SettingsTab
                 C.Save();
             }
             ImGuiEx.Tooltip("When enabled, pausing, resuming and stopping macros will also pause, resume and stop the child macros.".Loc());
+
+            var praiseDone = C.TataruPraiseOnMacroComplete;
+            if (ImGui.Checkbox("Have Tataru speak when a macro finishes".Loc(), ref praiseDone))
+            {
+                C.TataruPraiseOnMacroComplete = praiseDone;
+                C.Save();
+            }
+            ImGuiEx.Tooltip("Requires the TataruPraise plugin. Only fires when a macro runs to its end by itself; stopping it yourself and child macros started by /runmacro stay silent.".Loc());
+
+            var praiseError = C.TataruPraiseOnMacroError;
+            if (ImGui.Checkbox("Have Tataru speak when a macro stops on an error".Loc(), ref praiseError))
+            {
+                C.TataruPraiseOnMacroError = praiseError;
+                C.Save();
+            }
+            ImGuiEx.Tooltip("Requires the TataruPraise plugin. Uses its \"need help\" line rather than the \"macro finished\" one.".Loc());
         });
 
         ImGuiUtils.Section("Crafting Settings".Loc(), () =>
