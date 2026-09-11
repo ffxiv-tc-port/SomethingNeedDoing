@@ -1,9 +1,11 @@
-﻿using ECommons.Automation.UIInput;
+﻿using Dalamud.Memory;
+using ECommons.Automation.UIInput;
 using ECommons.UIHelpers;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using FFXIVClientStructs.Interop;
 using SomethingNeedDoing.Core.Interfaces;
+using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
 
 namespace SomethingNeedDoing.LuaMacro.Wrappers;
 public unsafe class AddonWrapper(string name) : IWrapper
@@ -65,8 +67,11 @@ public unsafe class AddonWrapper(string name) : IWrapper
         }
     }
 
-    [LuaDocs(description: "Gets all non-empty string values from the addon's AtkValues, in order.")]
-    public List<string> GetValueTexts() => [.. AtkValuesList.Select(v => v.GetValueAsString()).Where(s => !string.IsNullOrEmpty(s))];
+    [LuaDocs(description: "Gets all non-empty string values from the addon's AtkValues, in order. Icon/link payloads are stripped.")]
+    public List<string> GetValueTexts() => [.. AtkValuesList.Where(AtkValueText.HasText).Select(AtkValueText.Get)];
+
+    [LuaDocs(description: "Same as GetValueTexts, but keeps the raw bytes: SeString icon/link payloads are NOT stripped.")]
+    public List<string> GetValueTextsRaw() => [.. AtkValuesList.Select(v => v.GetValueAsString()).Where(s => !string.IsNullOrEmpty(s))];
 
     [LuaDocs(description: "Dumps every node's id/type/visibility/text, for diagnosing an addon's node layout.")]
     public List<string> DumpNodes()
@@ -309,6 +314,58 @@ public class AtkValueWrapper(AtkValue value) : IWrapper
 {
     private AtkValue Value = value;
 
-    [LuaDocs] public string ValueString => Value.GetValueAsString();
+    [LuaDocs] public string ValueString => AtkValueText.Get(Value);
 
+    [LuaDocs(description: "The value text without stripping SeString icon/link payloads (what ValueString used to return).")]
+    public string ValueStringRaw => Value.GetValueAsString();
+}
+
+/// <summary>
+/// <c>AtkValue</c> 的文字讀取：字串型別剝掉 SeString payload，其餘型別原樣交回
+/// <c>GetValueAsString()</c>。
+/// </summary>
+/// <remarks>
+/// 🔴 <c>AtkValue.GetValueAsString()</c> 對 <c>String</c>／<c>ManagedString</c>／<c>String8</c>
+/// 走的是 <c>CStringPointer.ToString()</c>（<c>Encoding.UTF8.GetString(AsSpan())</c>），
+/// <b>不剝 SeString payload</b>：道具連結那種帶 0xFF 長度前綴的 payload 會解出 U+FFFD，
+/// 內嵌圖示 payload（<c>02 12 02 &lt;icon+1&gt; 03</c>）會留下一個可列印的雜字元。
+/// 這些字串是直接交給 Lua 巨集拿去 <c>find</c>／<c>Contains</c> 比對的，
+/// 而比對的另一側（使用者寫在巨集裡的字、或 Excel 表查出來的名字）是純文字，
+/// 兩側基準不同就會<b>靜默比不中</b>。
+/// <para>
+/// ⚠️ 非字串型別（<c>Bool</c>／<c>Int</c>／<c>UInt</c>／<c>Float</c>／<c>WideString</c>／
+/// <c>Pointer</c>…）一律原樣交回 <c>GetValueAsString()</c> —— 那幾條分支跟 SeString 無關，
+/// 動了才是回退行為。
+/// </para>
+/// </remarks>
+internal static unsafe class AtkValueText
+{
+    private static bool IsStringType(AtkValue value)
+        => value.Type is ValueType.String or ValueType.ManagedString or ValueType.String8;
+
+    /// <summary>剝掉 payload 之後的文字。</summary>
+    public static string Get(AtkValue value)
+    {
+        if (!IsStringType(value)) return value.GetValueAsString();
+
+        var ptr = value.String.Value;
+        return ptr == null ? string.Empty : MemoryHelper.ReadSeStringNullTerminated((nint)ptr).GetText();
+    }
+
+    /// <summary>這一格在<b>未剝 payload 的讀法</b>底下是不是非空。</summary>
+    /// <remarks>
+    /// 🔴 <c>GetValueTexts()</c> 的過濾條件刻意沿用這個判準，而不是改成「剝完之後非空」：
+    /// 只由 payload 構成的格子剝完會變成空字串，用新判準過濾會讓那一格<b>從清單裡消失</b>，
+    /// 後面每一格的索引整個往前移一位 —— 而 <c>AddonModule.SelectContextIconMenuEntryByText</c>
+    /// 與 <c>Macros/care_all.lua</c>／<c>Macros/tend_garden.lua</c> 都是拿位置去算
+    /// <c>/callback</c> 的 index，位移的失敗形式是<b>按到隔壁那一項</b>，不會報錯。
+    /// 沿用舊判準 ⇒ 清單長度與每一格的位置與改動前逐字相同，只有內容被剝乾淨。
+    /// </remarks>
+    public static bool HasText(AtkValue value)
+    {
+        if (!IsStringType(value)) return !string.IsNullOrEmpty(value.GetValueAsString());
+
+        var ptr = value.String.Value;
+        return ptr != null && *ptr != 0;
+    }
 }

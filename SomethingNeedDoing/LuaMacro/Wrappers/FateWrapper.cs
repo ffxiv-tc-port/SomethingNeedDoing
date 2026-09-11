@@ -61,7 +61,10 @@ public unsafe class FateWrapper(ushort id) : IWrapper
     [LuaDocs] public FateState State { get { var f = Fate; if (f == null) return default; return f->State; } }
     [LuaDocs] public int StartTimeEpoch { get { var f = Fate; if (f == null) return 0; return f->StartTimeEpoch; } }
     [LuaDocs] public float Duration { get { var f = Fate; if (f == null) return 0f; return f->Duration; } }
-    [LuaDocs] public string Name { get { var f = Fate; if (f == null) return string.Empty; return f->Name.ToString(); } }
+    // 🔴 同 DynamicEventWrapper：Utf8String.ToString() 不剝 SeString payload，
+    //    FATE 名稱帶圖示／連結 payload 時會解出 U+FFFD 與雜字元，
+    //    而巨集典型寫法是 if fate.Name == "某某" —— 比不中而且完全不報錯。
+    [LuaDocs] public string Name { get { var f = Fate; if (f == null) return string.Empty; return f->Name.GetText(); } }
     [LuaDocs] public float HandInCount { get { var f = Fate; if (f == null) return 0f; return f->HandInCount; } }
     [LuaDocs] public Vector3 Location { get { var f = Fate; if (f == null) return default; return f->Location; } }
     [LuaDocs] public float Progress { get { var f = Fate; if (f == null) return 0f; return f->Progress; } }

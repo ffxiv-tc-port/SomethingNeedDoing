@@ -117,8 +117,12 @@ public unsafe class InstancedContentModule : LuaModuleBase
         [LuaDocs] public uint SecondsLeft => evt.SecondsLeft;
         [LuaDocs] public uint SecondsDuration => evt.SecondsDuration;
         [LuaDocs] public byte Participants => evt.Participants;
-        [LuaDocs] public string Name => evt.Name.ToString();
-        [LuaDocs] public string Description => evt.Description.ToString();
+        // 🔴 Utf8String.ToString() 是 Encoding.UTF8.GetString(AsSpan())，不剝 SeString payload。
+        //    動態事件的名稱／說明是遊戲自己組的文字，裡面會帶圖示與連結 payload，
+        //    直接解碼會混進 U+FFFD 與雜字元，而巨集拿它去比對的是純文字。
+        //    GetText() 是 ECommons 既有的讀法（同 NodeWrapper.Text）。
+        [LuaDocs] public string Name => evt.Name.GetText();
+        [LuaDocs] public string Description => evt.Description.GetText();
         [LuaDocs] public byte Progress => evt.Progress;
         [LuaDocs] public DynamicEventState State => evt.State;
         [LuaDocs] public bool IsActive => evt.IsActive();
