@@ -51,6 +51,10 @@ public class Config
             return;
 
         _lastConfigChange = DateTime.Now;
+        // 監聽器的回呼在它自己的執行緒上；卸載窗內轉派會就地在那條執行緒跑。
+        if (FrameworkUnloadGuard.ShouldSkip("設定檔變更"))
+            return;
+
         Svc.Framework.RunOnTick(() => ConfigFileChanged?.Invoke());
     }
 

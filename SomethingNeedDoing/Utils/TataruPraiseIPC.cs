@@ -90,6 +90,9 @@ public static class TataruPraiseIPC
     /// </remarks>
     private static void Send(string category, string reason)
     {
+        if (FrameworkUnloadGuard.ShouldSkip("塔塔露語音通知"))
+            return;
+
         try
         {
             _ = Svc.Framework.RunOnFrameworkThread(() => SendOnFramework(category, reason));

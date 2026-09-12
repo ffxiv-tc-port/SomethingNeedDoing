@@ -78,6 +78,10 @@ public static class ChatExtensions
     /// </remarks>
     private static void QueueForFramework(IChatGui chat, XivChatEntry entry)
     {
+        // 卸載窗內轉派會就地在呼叫端執行緒跑，那等於直接動 Dalamud 的裸聊天佇列。
+        if (FrameworkUnloadGuard.ShouldSkip("聊天輸出"))
+            return;
+
         Pending.Enqueue((chat, entry));
         _ = Svc.Framework.RunOnFrameworkThread(static () =>
         {
