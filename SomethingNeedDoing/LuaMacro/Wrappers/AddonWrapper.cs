@@ -310,14 +310,41 @@ public unsafe class NodeWrapper : IWrapper
     [LuaDocs] public NodeType NodeType { get { var node = Node; return node == null ? default : node->Type; } }
 }
 
-public class AtkValueWrapper(AtkValue value) : IWrapper
+/// <summary><c>AtkValue</c> 一格的包裝層。兩個文字成員都在建構當下就抄成受管理字串。</summary>
+/// <remarks>
+/// 🔴 <b>原本是把整個 <c>AtkValue</c> 結構存進欄位</b>。那個結構的 0x8 是一個 union,
+/// 字串型別時裡面是 <c>CStringPointer</c>(指向原生 addon 的緩衝區)、<c>Vector</c> 型別時
+/// 是 <c>StdVector&lt;AtkValue&gt;*</c> —— 兩者都是原生指標,而讀取是在屬性裡才發生。
+/// 巨集的典型寫法是把包裝物件存進區域變數再跨 yield 讀它:
+/// <code>
+///     local v = Addons.SelectString:GetAtkValue(2)
+///     yield("/wait 1")
+///     if v.ValueString == "是" then ... end
+/// </code>
+/// 視窗在這兩行之間被關掉或重建,那塊記憶體就已經被回收 ——
+/// 再解參考輕則讀到別人的文字,重則 AccessViolationException,
+/// 那在 .NET Core 屬於 corrupted-state exception,C# 的 try/catch 與 Lua 的 pcall 都攔不到。
+///
+/// ⇒ 改成<b>建構當下就把兩個字串都算出來</b>,之後不再持有任何原生指標。
+/// ⚠️ 值與改動前相同:原本讀的也是建構當下複製下來的那份結構(指標沒有重新解析過),
+/// 所以這不是把「即時值」換成「快照」—— 本來就是快照,只是快照的時機從「讀的時候」
+/// 提前到「建構的時候」,而那正是指標唯一保證有效的時刻。
+/// </remarks>
+public class AtkValueWrapper : IWrapper
 {
-    private AtkValue Value = value;
+    private readonly string _valueString;
+    private readonly string _valueStringRaw;
 
-    [LuaDocs] public string ValueString => AtkValueText.Get(Value);
+    public AtkValueWrapper(AtkValue value)
+    {
+        _valueString = AtkValueText.Get(value);
+        _valueStringRaw = value.GetValueAsString();
+    }
+
+    [LuaDocs] public string ValueString => _valueString;
 
     [LuaDocs(description: "The value text without stripping SeString icon/link payloads (what ValueString used to return).")]
-    public string ValueStringRaw => Value.GetValueAsString();
+    public string ValueStringRaw => _valueStringRaw;
 }
 
 /// <summary>
