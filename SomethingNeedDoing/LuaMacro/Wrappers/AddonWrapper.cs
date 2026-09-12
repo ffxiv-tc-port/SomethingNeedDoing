@@ -57,13 +57,21 @@ public unsafe class AddonWrapper(string name) : IWrapper
         return new(addon->AtkValues[index]);
     }
 
+    // 🔴 原本是 yield return 的惰性迭代器。AtkValuesList 那份快照裡的每一格都還帶著原生
+    //    字串指標,而包裝物件是在「呼叫端往前走一步」的那一刻才建構的 —— Lua 端把這個序列
+    //    存起來、隔幾幀再走完,讀到的就是已經失效的指標。
+    //    改成當場走完:整個原生讀取收斂在取得這個屬性的那一幀之內。
+    //    ⚠️ 元素的型別、順序與數量都沒有改,Lua 端的 for/ipairs 寫法一行都不用動。
     [LuaDocs]
     public unsafe IEnumerable<AtkValueWrapper> AtkValues
     {
         get
         {
-            foreach (var v in AtkValuesList)
-                yield return new AtkValueWrapper(v);
+            var values = AtkValuesList;
+            var list = new List<AtkValueWrapper>(values.Length);
+            foreach (var v in values)
+                list.Add(new AtkValueWrapper(v));
+            return list;
         }
     }
 
