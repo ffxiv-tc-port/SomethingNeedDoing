@@ -26,4 +26,23 @@ internal static class FrameworkUnloadGuard
 
         return true;
     }
+
+    /// <summary>
+    /// 給<b>被 <c>await</c> 的</b>轉派用：卸載窗內以取消收場，而不是靜靜放棄。
+    /// </summary>
+    /// <remarks>
+    /// 契約：呼叫端會看到 <see cref="OperationCanceledException"/>，走它原本處理「使用者按停止」的路徑。
+    /// <see cref="ShouldSkip"/> 那種「回 true 就 return」只能用在沒人 await 的地方——那等於餵一個假的預設值。
+    /// 判斷條件與 <see cref="ShouldSkip"/> 相同：已在 framework 執行緒上時不擲。
+    /// </remarks>
+    internal static void ThrowIfUnloading(string scope, CancellationToken cancellationToken = default)
+    {
+        var framework = Svc.Framework;
+        if (!framework.IsFrameworkUnloading || framework.IsInFrameworkUpdateThread)
+            return;
+
+        var message = $"插件卸載，巨集 {scope} 中止。";
+        FrameworkLogger.Info(message);
+        throw new OperationCanceledException(message, cancellationToken);
+    }
 }

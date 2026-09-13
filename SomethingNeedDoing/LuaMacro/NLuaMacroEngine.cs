@@ -127,6 +127,8 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
             _activeLuaEnvironments[macro.Macro.Id] = lua; // for function triggers to access the same state
 
             await LoadDependenciesIntoScope(lua, macro.Macro);
+            // 卸載窗內這個轉派會就地跑在呼叫端執行緒上，等於沒有轉派。
+            FrameworkUnloadGuard.ThrowIfUnloading(macro.Macro.Name, token);
             await Svc.Framework.RunOnTick(async () =>
             {
                 try
@@ -148,6 +150,7 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
                             if (macro.LuaGenerator == null)
                                 break;
 
+                            FrameworkUnloadGuard.ThrowIfUnloading(macro.Macro.Name, token);
                             var (macroComplete, result) = await Svc.Framework.RunOnTick(() =>
                             {
                                 var result = macro.LuaGenerator.Call();

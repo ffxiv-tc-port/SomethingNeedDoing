@@ -312,6 +312,8 @@ public class MacroScheduler : IMacroScheduler, IDisposable
                     }
                 });
 
+                // 卸載窗內這個轉派會就地跑在呼叫端執行緒上，等於沒有轉派。
+                FrameworkUnloadGuard.ThrowIfUnloading(macro.Name, state.CancellationSource.Token);
                 await Svc.Framework.RunOnTick(async () =>
                 {
                     try
@@ -320,6 +322,10 @@ public class MacroScheduler : IMacroScheduler, IDisposable
                         state.Macro.State = MacroState.Running;
                         await engine.StartMacro(macro, state.CancellationSource.Token, triggerArgs, loopCount);
                     }
+                    catch (OperationCanceledException)
+                    {
+                        state.StoppedManually = true;
+                    }
                     catch (Exception ex)
                     {
                         FrameworkLogger.Error(ex, $"Error executing macro {macro.Name}");
@@ -327,6 +333,11 @@ public class MacroScheduler : IMacroScheduler, IDisposable
                         await SetPluginStates(macro, true);
                     }
                 });
+            }
+            catch (OperationCanceledException)
+            {
+                // 與「使用者按停止」同一條收尾路徑：不標成 Error，也不念「跑完了」。
+                state.StoppedManually = true;
             }
             catch (Exception ex)
             {

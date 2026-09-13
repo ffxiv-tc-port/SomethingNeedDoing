@@ -138,6 +138,10 @@ public class EnginesModule : LuaModuleBase
             {
                 await engine.ExecuteAsync(content);
             }
+            catch (OperationCanceledException)
+            {
+                // 取消（使用者按停止／插件卸載）不是錯誤，安靜收掉。
+            }
             catch (Exception ex)
             {
                 FrameworkLogger.Error($"Error executing {engine.Name} content: {ex}");
