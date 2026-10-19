@@ -35,6 +35,8 @@ public class CallbackCommand(string text, string addonName, bool updateState, ob
                 {
                     FrameworkLogger.Debug($"Sending callback to {addonName} with args [{string.Join(", ", values)}]");
                     Callback.Fire(addon, updateState, values);
+                    if (values.Length > 0 && values[0] is int index)
+                        CallbackNotifier.Publish(addonName, index, updateState);
                 }
             }
         });

@@ -57,7 +57,7 @@ public abstract class MacroCommandBase(string text) : IMacroCommand
     public DistanceModifier? DistanceModifier { get; set; }
 
     /// <inheritdoc/>
-    public ItemQualityModifier? ItemQualityModifier { get; set; }
+    public HqModifier? ItemQualityModifier { get; set; }
 
     /// <inheritdoc/>
     public ErrorIfModifier? ErrorIfModifier { get; set; }

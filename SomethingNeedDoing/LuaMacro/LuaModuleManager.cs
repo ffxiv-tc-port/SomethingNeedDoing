@@ -17,6 +17,7 @@ public class LuaModuleManager
         _documentation = documentation;
         RegisterModule(new ActionsModule());
         RegisterModule(new AddonModule());
+        RegisterModule(new ChatModule());
         RegisterModule(new DalamudModule());
         RegisterModule(new EntityModule());
         RegisterModule(new ExcelModule());

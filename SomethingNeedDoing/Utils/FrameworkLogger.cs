@@ -9,6 +9,13 @@ namespace SomethingNeedDoing.Utils;
 public static class FrameworkLogger
 {
     /// <summary>
+    /// Dalamud 根層會不會收 Verbose。ECommons 把插件層級設成 Verbose，所以 <c>Svc.Log.MinimumLogLevel</c> 恆真、不能當閘門；
+    /// 呼叫端的內插字串在進 <see cref="Verbose"/> 之前就組好了，每幀／每則訊息的路徑要先判這個。
+    /// </summary>
+    public static bool VerboseEnabled
+        => global::Dalamud.EntryPoint.LogLevelSwitch.MinimumLevel <= Serilog.Events.LogEventLevel.Verbose;
+
+    /// <summary>
     /// Logs an informational message with the calling class name as prefix.
     /// </summary>
     /// <param name="message">The message to log.</param>
@@ -37,6 +44,9 @@ public static class FrameworkLogger
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Verbose(string message, [CallerFilePath] string path = "")
     {
+        // 根層丟掉的 Verbose 在 Dalamud 那邊仍會先組前綴、建 LogEvent；寫出與否和不判時相同。
+        if (!VerboseEnabled)
+            return;
         Svc.Log.Verbose($"[{Path.GetFileNameWithoutExtension(path)}] {message}");
     }
 

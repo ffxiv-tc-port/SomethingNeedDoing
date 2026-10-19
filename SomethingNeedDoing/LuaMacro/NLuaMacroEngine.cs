@@ -49,18 +49,13 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
         public IMacro Macro { get; } = macro;
         public LuaFunction? LuaGenerator { get; set; }
         public CancellationTokenSource CancellationSource { get; } = new();
-        public ManualResetEventSlim PauseEvent { get; } = new(true);
         public Task? ExecutionTask { get; set; }
 
-        public void Dispose()
-        {
-            CancellationSource.Dispose();
-            PauseEvent.Dispose();
-        }
+        public void Dispose() => CancellationSource.Dispose();
     }
 
     /// <inheritdoc/>
-    public async Task StartMacro(IMacro macro, CancellationToken token, TriggerEventArgs? triggerArgs = null, int _ = 0)
+    public async Task StartMacro(IMacro macro, IMacroInstance instance, CancellationToken token, TriggerEventArgs? triggerArgs = null, int _ = 0)
     {
         if (macro.Type != MacroType.Lua)
             throw new ArgumentException("This engine only supports Lua macros", nameof(macro));
@@ -72,7 +67,7 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
 
         try
         {
-            state.ExecutionTask = ExecuteMacro(state, token, triggerArgs);
+            state.ExecutionTask = ExecuteMacro(state, instance, token, triggerArgs);
             await state.ExecutionTask;
         }
         catch (Exception ex)
@@ -82,15 +77,16 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
         }
     }
 
-    private async Task ExecuteMacro(MacroInstance macro, CancellationToken externalToken, TriggerEventArgs? triggerArgs = null, int _ = 0)
+    private async Task ExecuteMacro(MacroInstance macro, IMacroInstance instance, CancellationToken externalToken, TriggerEventArgs? triggerArgs = null, int _ = 0)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(externalToken, macro.CancellationSource.Token);
         var token = linkedCts.Token;
 
+        Lua? lua = null;
         try
         {
             FrameworkLogger.Debug($"Starting Lua macro execution for macro {macro.Macro.Id}");
-            using var lua = new Lua();
+            lua = new Lua();
             lua.State.Encoding = Encoding.UTF8;
 
             lua.LoadCLRPackage();
@@ -126,6 +122,8 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
             _activeLuaEnvironments[macro.Macro.Id] = lua; // for function triggers to access the same state
 
             await LoadDependenciesIntoScope(lua, macro.Macro);
+            // 卸載窗內這個轉派會就地跑在呼叫端執行緒上，等於沒有轉派。
+            FrameworkUnloadGuard.ThrowIfUnloading(macro.Macro.Name, token);
             await Svc.Framework.RunOnTick(async () =>
             {
                 try
@@ -142,11 +140,12 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
                         try
                         {
                             // Wait if paused
-                            macro.PauseEvent.Wait(token);
+                            await MacroPause.WaitWhilePausedAsync(instance.PauseEvent, token);
 
                             if (macro.LuaGenerator == null)
                                 break;
 
+                            FrameworkUnloadGuard.ThrowIfUnloading(macro.Macro.Name, token);
                             var (macroComplete, result) = await Svc.Framework.RunOnTick(() =>
                             {
                                 var result = macro.LuaGenerator.Call();
@@ -220,6 +219,20 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
         finally
         {
             _activeLuaEnvironments.Remove(macro.Macro.Id, out var _);
+
+            // Doing this manually since NLua is a very well written library
+            if (lua != null)
+            {
+                try
+                {
+                    lua.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    FrameworkLogger.Warning($"Error disposing Lua environment for macro {macro.Macro.Id}: {ex.Message}");
+                }
+            }
+
             macro.Dispose();
         }
     }

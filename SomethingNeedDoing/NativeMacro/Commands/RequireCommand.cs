@@ -17,7 +17,7 @@ public class RequireCommand(string text, string[] conditions) : RequireCommandBa
     protected override async Task<bool> CheckCondition(MacroContext context)
     {
         var result = false;
-        await context.RunOnFramework(() => result = Svc.ClientState.LocalPlayer?.StatusList.Any(s => s.GameData.Value.Name.ExtractText().EqualsIgnoreCase(conditions.ToString() ?? string.Empty)) ?? false);
+        await context.RunOnFramework(() => result = Svc.Objects.LocalPlayer?.StatusList.Any(s => s.GameData.Value.Name.ExtractText().EqualsIgnoreCase(conditions.ToString() ?? string.Empty)) ?? false);
         return result;
     }
 
@@ -31,6 +31,16 @@ public class RequireCommand(string text, string[] conditions) : RequireCommandBa
         await PerformWait(token);
     }
 
-    private unsafe bool InInstance() => GameMain.Instance()->CurrentContentFinderConditionId != 0;
-    private unsafe bool HasItem(uint id) => InventoryManager.Instance()->GetInventoryItemCount(id) > 0;
+    // 位址沒解出(改版後特徵碼對不上)時兩個都回 false。
+    private unsafe bool InInstance()
+    {
+        var gameMain = GameStatics.TryGameMain();
+        return gameMain != null && gameMain->CurrentContentFinderConditionId != 0;
+    }
+
+    private unsafe bool HasItem(uint id)
+    {
+        var manager = GameStatics.TryInventoryManager();
+        return manager != null && GameStatics.Resolved(InventoryManager.MemberFunctionPointers.GetInventoryItemCount, "InventoryManager.GetInventoryItemCount") && manager->GetInventoryItemCount(id) > 0;
+    }
 }

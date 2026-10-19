@@ -2,6 +2,7 @@
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using SomethingNeedDoing.Gui.Modals;
 using SomethingNeedDoing.Gui.Tabs;
@@ -63,12 +64,17 @@ public class MainWindow : Window
 
     public override void PreDraw()
     {
+        base.PreDraw();
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(10, 10));
         ClickedHeaderLastFrame = ClickedHeaderCurrentFrame;
         ClickedHeaderCurrentFrame = false;
     }
 
-    public override void PostDraw() => ImGui.PopStyleVar();
+    public override void PostDraw()
+    {
+        ImGui.PopStyleVar();
+        base.PostDraw();
+    }
 
     public override void Draw()
     {
@@ -81,15 +87,15 @@ public class MainWindow : Window
         _versionHistoryModal.Draw();
 
         using var _ = ImRaii.TabBar("Tabs");
-        using (var tab = ImRaii.TabItem("MacrosLibrary"))
+        using (var tab = ImRaii.TabItem("MacrosLibrary".Loc()))
             if (tab)
                 _macrosTab.Draw();
 
-        using (var tab = ImRaii.TabItem("Help"))
+        using (var tab = ImRaii.TabItem("Help".Loc()))
             if (tab)
                 _helpTab.Draw();
 
-        using (var tab = ImRaii.TabItem("Settings"))
+        using (var tab = ImRaii.TabItem("Settings".Loc()))
             if (tab)
                 SettingsTab.DrawTab();
     }

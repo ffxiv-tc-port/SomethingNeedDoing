@@ -6,7 +6,7 @@ namespace SomethingNeedDoing.External;
 public class Questionable : IPC
 {
     public override string Name => "Questionable";
-    public override string Repo => Repos.Liza;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(description: "Checks if the plugin is running")]

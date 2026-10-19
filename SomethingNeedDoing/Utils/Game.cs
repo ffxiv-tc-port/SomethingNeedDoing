@@ -9,21 +9,36 @@ using Lumina.Excel.Sheets;
 namespace SomethingNeedDoing.Utils;
 public static unsafe class Game
 {
-    public static bool CanUseAction(ActionType actionType, uint actionId) => ActionManager.Instance()->GetActionStatus(actionType, actionId) == 0;
+    // 本檔的遊戲位址一律走 GameStatics:位址沒解出(改版後特徵碼對不上)時,查詢回 false／0、Interact 回 false(沒送出),
+    // 原本就以 MacroException 回報「找不到」的三支(GetInventoryItemCount／UseItem／OpenRecipe)照舊擲 MacroException。
+    public static bool CanUseAction(ActionType actionType, uint actionId)
+    {
+        var am = GameStatics.TryActionManager();
+        return am != null && GameStatics.Resolved(ActionManager.MemberFunctionPointers.GetActionStatus, "ActionManager.GetActionStatus") && am->GetActionStatus(actionType, actionId) == 0;
+    }
     public static bool CanUseCraftAction(uint actionId) => CanUseAction(actionId >= 100000 ? ActionType.CraftAction : ActionType.Action, actionId);
-    public static bool Interact(IGameObject? obj) => obj != null && TargetSystem.Instance()->InteractWithObject(obj.Struct(), false) != 0;
+    // 回傳＝有沒有把互動送出去,不是互動成功。InteractWithObject 的回傳值沒有語意,
+    // 不是狀態碼,拿它比 0 幾乎恆真。成敗只能由呼叫端看後續遊戲狀態。
+    public static bool Interact(IGameObject? obj)
+    {
+        if (obj == null) return false;
+        var targetSystem = GameStatics.TryTargetSystem();
+        if (targetSystem == null || !GameStatics.Resolved(TargetSystem.MemberFunctionPointers.InteractWithObject, "TargetSystem.InteractWithObject")) return false;
+        targetSystem->InteractWithObject(obj.Struct(), false);
+        return true;
+    }
     public static int GetInventoryItemCount(uint itemId, bool isHQ)
     {
-        var inventoryManager = InventoryManager.Instance();
-        return inventoryManager == null
+        var inventoryManager = GameStatics.TryInventoryManager();
+        return inventoryManager == null || !GameStatics.Resolved(InventoryManager.MemberFunctionPointers.GetInventoryItemCount, "InventoryManager.GetInventoryItemCount")
             ? throw new MacroException("InventoryManager not found")
             : inventoryManager->GetInventoryItemCount(itemId, isHQ);
     }
 
     public static void UseItem(uint itemId, bool isHq)
     {
-        var agent = AgentInventoryContext.Instance();
-        if (agent == null)
+        var agent = GameStatics.AgentChainResolved() ? AgentInventoryContext.Instance() : null;
+        if (agent == null || !GameStatics.Resolved(AgentInventoryContext.MemberFunctionPointers.UseItem, "AgentInventoryContext.UseItem"))
             throw new MacroException("AgentInventoryContext not found");
 
         if (isHq)
@@ -36,7 +51,7 @@ public static unsafe class Game
 
     public static bool NeedsRepair(int durabilityThreshold = 0)
     {
-        var container = InventoryManager.Instance()->GetInventoryContainer(InventoryType.EquippedItems);
+        var container = GameStatics.TryInventoryContainer(InventoryType.EquippedItems);
         if (container == null) return false;
 
         for (var i = 0; i < container->Size; i++)
@@ -53,7 +68,7 @@ public static unsafe class Game
 
     public static bool HasSpiritbondedItems(float within = 100)
     {
-        var equipped = InventoryManager.Instance()->GetInventoryContainer(InventoryType.EquippedItems);
+        var equipped = GameStatics.TryInventoryContainer(InventoryType.EquippedItems);
         if (equipped == null || !equipped->IsLoaded) return false;
 
         var hasFullySpiritbonded = false;
@@ -150,7 +165,7 @@ public static unsafe class Game
 
             public bool IncreasesProgress => GetActionResult(Id).Progress > 0;
             public bool IncreasesQuality => GetActionResult(Id).Quality > 0;
-            public bool CanExecute => ActionManager.Instance()->GetActionStatus(IsCraftAction ? ActionType.CraftAction : ActionType.Action, Id) == 0;
+            public bool CanExecute => CanUseAction(IsCraftAction ? ActionType.CraftAction : ActionType.Action, Id);
         }
 
         public static bool IsCraftActionByName(string name, StringComparison comparison = StringComparison.OrdinalIgnoreCase)
@@ -170,8 +185,8 @@ public static unsafe class Game
 
         public static void OpenRecipe(uint recipeId)
         {
-            var agent = AgentRecipeNote.Instance();
-            if (agent == null)
+            var agent = GameStatics.AgentChainResolved() ? AgentRecipeNote.Instance() : null;
+            if (agent == null || !GameStatics.Resolved(AgentRecipeNote.MemberFunctionPointers.OpenRecipeByRecipeIdInternal, "AgentRecipeNote.OpenRecipeByRecipeIdInternal"))
                 throw new MacroException("AgentRecipeNote not found");
 
             agent->OpenRecipeByRecipeId(recipeId);
@@ -202,7 +217,7 @@ public static unsafe class Game
 
         public static (uint Progress, uint Quality) GetActionResult(uint id)
         {
-            var agent = AgentCraftActionSimulator.Instance();
+            var agent = GameStatics.AgentChainResolved() ? AgentCraftActionSimulator.Instance() : null;
             if (agent == null) return (0, 0);
 
             var progress = agent->Progress.FirstOrDefault(p => p.ActionId == id).ProgressIncrease;

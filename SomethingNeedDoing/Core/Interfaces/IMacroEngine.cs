@@ -13,10 +13,11 @@ public interface IMacroEngine : IDisposable
     /// Starts executing a macro.
     /// </summary>
     /// <param name="macro">The macro to execute.</param>
+    /// <param name="instance">呼叫端持有的執行個體；暫停鈕改的就是它的 <see cref="IMacroInstance.PauseEvent"/>，引擎每一步之前等它。</param>
     /// <param name="token">A token to cancel execution.</param>
     /// <param name="triggerEventArgs">Optional trigger event arguments.</param>
     /// <param name="loopCount">Optional number of times to loop the macro. Only supported by native macros.</param>
-    Task StartMacro(IMacro macro, CancellationToken token, TriggerEventArgs? triggerEventArgs = null, int loopCount = 0);
+    Task StartMacro(IMacro macro, IMacroInstance instance, CancellationToken token, TriggerEventArgs? triggerEventArgs = null, int loopCount = 0);
 
     /// <summary>
     /// Event raised when a macro encounters an error.

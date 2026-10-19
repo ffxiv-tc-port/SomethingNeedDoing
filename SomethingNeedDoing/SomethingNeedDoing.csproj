@@ -1,16 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project Sdk="Dalamud.NET.Sdk/12.0.2">
+<Project Sdk="Dalamud.NET.Sdk/13.0.0">
 	<PropertyGroup>
-		<Version>0.0.0.0</Version>
 		<LangVersion>preview</LangVersion>
+
+		<BuildNumberFile>$(MSBuildProjectDirectory)\BuildNumber.txt</BuildNumberFile>
+		<_PreviousBuildNumber Condition="Exists('$(BuildNumberFile)')">$([System.IO.File]::ReadAllText('$(BuildNumberFile)').Trim())</_PreviousBuildNumber>
+		<_PreviousBuildNumber Condition="'$(_PreviousBuildNumber)' == ''">0</_PreviousBuildNumber>
+		<BuildNumber>$([MSBuild]::Add($(_PreviousBuildNumber), 1))</BuildNumber>
+		<VersionPrefix>7.15.0</VersionPrefix>
+		<Version>$(VersionPrefix).$(BuildNumber)</Version>
+		<AssemblyVersion>$(Version)</AssemblyVersion>
+		<FileVersion>$(Version)</FileVersion>
 	</PropertyGroup>
+
+	<Target Name="PersistBuildNumber" AfterTargets="Build">
+		<WriteLinesToFile File="$(BuildNumberFile)" Lines="$(BuildNumber)" Overwrite="true" />
+	</Target>
 
 	<PropertyGroup Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))'">
 		<DalamudLibPath>$(DALAMUD_HOME)/</DalamudLibPath>
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="ImGuiColorTextEditNetDalamud" Version="1.0.0" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.5" />
 		<PackageReference Include="NLua" Version="1.7.5" />
 		<PackageReference Include="Scrutor" Version="6.1.0" />
@@ -20,5 +31,19 @@
 	<ItemGroup>
 		<ProjectReference Include="..\ECommons\ECommons\ECommons.csproj" />
 		<ProjectReference Include="..\AutoRetainerAPI\AutoRetainerAPI\AutoRetainerAPI.csproj" />
+		<!-- 編輯器套件 ImGuiColorTextEditNetDalamud 1.0.0 的原始碼（OhKannaDuh/DalamudCodeEditor 2456cf15，MIT）；1.1.0 起改 net10 不能用。 -->
+		<ProjectReference Include="..\DalamudCodeEditor\DalamudCodeEditor.csproj" />
 	</ItemGroup>
+
+	<ItemGroup>
+		<Content Include="LanguageChineseTraditional.ini" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+
+	<!-- ECommons 的文件註解檔 ECommons.xml 執行期用不到：不複製進輸出目錄，出貨包也就不帶它（ECommons.pdb 照留，崩潰堆疊行號要用）。 -->
+	<Target Name="ExcludeECommonsXmlDoc" AfterTargets="ResolveAssemblyReferences">
+		<ItemGroup>
+			<_ECommonsXmlDoc Include="@(ReferenceCopyLocalPaths)" Condition="'%(Filename)%(Extension)' == 'ECommons.xml'" />
+			<ReferenceCopyLocalPaths Remove="@(_ECommonsXmlDoc)" />
+		</ItemGroup>
+	</Target>
 </Project>

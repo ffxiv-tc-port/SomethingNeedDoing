@@ -21,6 +21,8 @@ public class CodeEditor : IDisposable
     private IMacro? macro = null;
     private CancellationTokenSource? _debounceCts;
     private bool _lastIsDirty = false;
+    // 內容含不成對的代理字元時強制唯讀：編輯器只能顯示成 U+FFFD，存回會改掉使用者的內容。
+    private bool _forceReadOnly;
 
     public CodeEditor(LuaLanguageDefinition lua, MetadataParser metadataParser)
     {
@@ -34,7 +36,7 @@ public class CodeEditor : IDisposable
     public bool ReadOnly
     {
         get => _editor.IsReadOnly;
-        set => _editor.SetReadOnly(value);
+        set => _editor.SetReadOnly(value || _forceReadOnly);
     }
 
     public bool IsHighlightingSyntax
@@ -63,7 +65,7 @@ public class CodeEditor : IDisposable
             return;
 
         this.macro = macro;
-        _editor.Buffer.SetText(macro.Content);
+        LoadContent(macro);
         _editor.UndoManager.Clear();
 
         if (_languages.TryGetValue(macro.Type, out var language))
@@ -73,7 +75,17 @@ public class CodeEditor : IDisposable
     public void RefreshContent()
     {
         if (macro != null)
-            _editor.Buffer.SetText(macro.Content);
+            LoadContent(macro);
+    }
+
+    private void LoadContent(IMacro m)
+    {
+        _forceReadOnly = !EditorTextLoader.Load(_editor, m.Content);
+        if (_forceReadOnly)
+        {
+            _editor.SetReadOnly(true);
+            FrameworkLogger.Warning($"巨集「{m.Name}」含不成對的 UTF-16 代理字元，編輯器改為唯讀以免存回時改掉內容");
+        }
     }
 
     public string GetContent() => _editor.Buffer.GetText();
@@ -84,7 +96,20 @@ public class CodeEditor : IDisposable
             return false;
 
         using var font = ImRaii.PushFont(UiBuilder.MonoFont);
-        _editor.Draw(macro.Name);
+        try
+        {
+            _editor.Draw(macro.Name);
+        }
+        catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "ch")
+        {
+            // 套件的復原／重做走 SetText，遇到 emoji 會在半途擲例外、緩衝區只剩前半段；
+            // 不救回的話下一次按鍵就把截斷的內容存回巨集。改回最後存檔的內容並清掉復原紀錄。
+            FrameworkLogger.Warning($"巨集「{macro.Name}」含 emoji 時無法復原／重做，已改回最後存檔的內容");
+            LoadContent(macro);
+            _editor.UndoManager.Clear();
+            _lastIsDirty = false;
+            return false;
+        }
 
         var isDirty = _editor.Buffer.IsDirty;
         if (isDirty && !_lastIsDirty && macro is ConfigMacro configMacro)

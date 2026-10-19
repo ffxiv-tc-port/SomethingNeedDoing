@@ -6,7 +6,7 @@ namespace SomethingNeedDoing.External;
 public class Artisan : IPC
 {
     public override string Name => "Artisan";
-    public override string Repo => Repos.Punish;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(description: "Gets the endurance status")]

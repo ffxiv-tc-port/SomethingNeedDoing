@@ -225,7 +225,8 @@ public class TriggerEventManager : IDisposable
                 if (string.IsNullOrEmpty(triggerFunction.FunctionName))
                 {
                     // Macro-level trigger: raise the event for the entire macro
-                    FrameworkLogger.Verbose($"Raising trigger event {eventType} for macro {triggerFunction.Macro.Name}");
+                    if (FrameworkLogger.VerboseEnabled)
+                        FrameworkLogger.Verbose($"Raising trigger event {eventType} for macro {triggerFunction.Macro.Name}");
                     TriggerEventOccurred?.Invoke(triggerFunction.Macro, args);
                 }
                 else
@@ -233,7 +234,8 @@ public class TriggerEventManager : IDisposable
                     // For function-level triggers, request function execution via event (doing this to avoid circular dependencies)
                     if (triggerFunction.Macro.Type == MacroType.Lua)
                     {
-                        FrameworkLogger.Verbose($"Requesting function execution for {triggerFunction.FunctionName} in macro {triggerFunction.Macro.Name}");
+                        if (FrameworkLogger.VerboseEnabled)
+                            FrameworkLogger.Verbose($"Requesting function execution for {triggerFunction.FunctionName} in macro {triggerFunction.Macro.Name}");
                         FunctionExecutionRequested?.Invoke(this, new FunctionExecutionRequestedEventArgs(triggerFunction.Macro.Id, triggerFunction.FunctionName, args));
                     }
                     else

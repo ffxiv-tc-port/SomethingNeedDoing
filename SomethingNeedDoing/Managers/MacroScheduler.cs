@@ -11,6 +11,7 @@ using SomethingNeedDoing.LuaMacro;
 using SomethingNeedDoing.LuaMacro.Wrappers;
 using SomethingNeedDoing.NativeMacro;
 using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,6 +35,32 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     private readonly MacroHierarchyManager _hierarchyManager;
 
     private readonly HashSet<string> _functionTriggersRegistered = [];
+
+    /// <summary>
+    /// 上一次向 AutoRetainer 登記「角色後處理」是在哪一次框架更新（<see cref="IFramework.LastUpdateUTC"/>）；
+    /// <c>null</c> 代表還沒登記過。
+    /// </summary>
+    /// <remarks>
+    /// 🔴 AutoRetainer 的登記表是以「外掛名」為鍵的，而這裡是替<b>每一支</b>訂閱了角色後處理的巨集
+    /// 各建一個 <c>AutoRetainerApi</c>，它們的外掛名全都是 SomethingNeedDoing ⇒ AutoRetainer 廣播一次，
+    /// <c>CheckCharacterPostProcess</c> 就會被呼叫 N 次，而第二次之後 AutoRetainer 那側會擲例外
+    /// （那是它刻意的防呆，不動它）。
+    /// 一次登記就足以讓全部巨集都拿到後處理輪次 —— AutoRetainer 回頭也是以外掛名廣播的，
+    /// 所有實例都收得到 —— 所以由消費端這側自己去重，只登記一次。
+    /// <para>
+    /// 🔴 這裡刻意<b>不</b>用 <c>UiBuilder.FrameCount</c> 當去重鍵：那個計數器只在<b>繪製</b>路徑上遞增，
+    /// 「遊戲 UI 隱藏」「過場動畫」「GPose」任一成立時整段期間凍結 ⇒ 去重鍵永遠是同一個值，
+    /// 第二輪之後會被整輪擋掉而<b>一次都不登記</b>。
+    /// <c>LastUpdateUTC</c> 是在 Framework.Update 裡無條件更新的，而 AutoRetainer 的廣播本身就是掛在
+    /// 同一個 Framework.Update 上跑的 ⇒ 兩者同源，不可能一邊在廣播、另一邊卻凍結。
+    /// </para>
+    /// <para>
+    /// 型別是可空的 <c>DateTime?</c> 而不是用 <c>DateTime.MinValue</c> 當哨兵：
+    /// <c>IFramework.LastUpdateUTC</c> 自己的初始值就是 <c>DateTime.MinValue</c>，
+    /// 拿它當哨兵會在「框架還沒跑過任何一次更新」時與真實值相撞而把第一次登記也擋掉。
+    /// </para>
+    /// </remarks>
+    private DateTime? _arCharacterPostProcessRequestedTick;
 
     /// <inheritdoc/>
     public event EventHandler<MacroStateChangedEventArgs>? MacroStateChanged;
@@ -283,13 +310,23 @@ public class MacroScheduler : IMacroScheduler, IDisposable
                     }
                 });
 
+                // 卸載窗內這個轉派會就地跑在呼叫端執行緒上，等於沒有轉派。
+                FrameworkUnloadGuard.ThrowIfUnloading(macro.Name, state.CancellationSource.Token);
                 await Svc.Framework.RunOnTick(async () =>
                 {
                     try
                     {
                         FrameworkLogger.Verbose($"Setting macro {macro.Id} state to Running");
                         state.Macro.State = MacroState.Running;
-                        await engine.StartMacro(macro, state.CancellationSource.Token, triggerArgs, loopCount);
+                        await engine.StartMacro(macro, state, state.CancellationSource.Token, triggerArgs, loopCount);
+                    }
+                    catch (OperationCanceledException) when (IsDeliberateStop(state))
+                    {
+                        state.StoppedManually = true;
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        await AbortMacro(state, ex);
                     }
                     catch (Exception ex)
                     {
@@ -298,6 +335,15 @@ public class MacroScheduler : IMacroScheduler, IDisposable
                         await SetPluginStates(macro, true);
                     }
                 });
+            }
+            catch (OperationCanceledException) when (IsDeliberateStop(state))
+            {
+                // 與「使用者按停止」同一條收尾路徑：不標成 Error，也不念「跑完了」。
+                state.StoppedManually = true;
+            }
+            catch (OperationCanceledException ex)
+            {
+                await AbortMacro(state, ex);
             }
             catch (Exception ex)
             {
@@ -313,67 +359,118 @@ public class MacroScheduler : IMacroScheduler, IDisposable
         await SetPluginStates(macro, true);
     }
 
+    /// <summary>
+    /// 只有巨集<b>自己的</b>取消源被取消（停止鈕、<c>/snd stop</c>、刪巨集、「跑完這圈就停」）或外掛正在卸載，才算「刻意停下」。
+    /// </summary>
+    /// <remarks>
+    /// 讀 <c>IsCancellationRequested</c> 不讀 <c>Token</c>：<c>OnMacroStateChanged</c> 可能已經
+    /// 釋放那個取消源，<c>Token</c> 此時擲例外，而例外濾鏡裡擲例外＝濾鏡靜默回假。
+    /// <para>卸載要單列：<c>ThrowIfUnloading</c> 擲的 OCE 帶著巨集 token，但那個 token 沒被取消。</para>
+    /// </remarks>
+    private static bool IsDeliberateStop(MacroExecutionState state)
+        => state.CancellationSource.IsCancellationRequested || Svc.Framework.IsFrameworkUnloading;
+
+    /// <summary>
+    /// 既不是使用者停下、也不是卸載中止的 <see cref="OperationCanceledException"/>（典型是
+    /// <c>HttpClient</c> 逾時的 <see cref="TaskCanceledException"/>）是真的失敗，走
+    /// <see cref="MacroState.Error"/> 並告訴使用者原因。
+    /// </summary>
+    private async Task AbortMacro(MacroExecutionState state, OperationCanceledException ex)
+    {
+        var macro = state.Macro;
+        var reason = ex is TaskCanceledException { InnerException: TimeoutException } ? "網路逾時" : ex.Message;
+        FrameworkLogger.Error(ex, $"Macro {macro.Name} aborted (not a user stop): {reason}");
+        Svc.Chat.PrintErrorMsg($"巨集 {macro.Name} 中止：{reason}");
+        macro.State = MacroState.Error;
+        await SetPluginStates(macro, true);
+    }
+
+    // 下面三個 async void 的例外沒人接、會丟到執行緒池讓整個遊戲結束，所以在方法內全包、只記一行 Error。
     /// <inheritdoc/>
     public async void PauseMacro(string macroId)
     {
-        if (_macroStates.TryGetValue(macroId, out var state))
+        try
         {
-            state.PauseEvent.Reset();
-            state.Macro.State = MacroState.Paused;
-            await SetPluginStates(state.Macro, true);
-
-            if (C.PropagateControlsToChildren)
+            if (_macroStates.TryGetValue(macroId, out var state))
             {
-                foreach (var child in _hierarchyManager.GetChildMacros(macroId))
+                state.PauseEvent.Reset();
+                state.Macro.State = MacroState.Paused;
+                await SetPluginStates(state.Macro, true);
+
+                if (C.PropagateControlsToChildren)
                 {
-                    if (_macroStates.TryGetValue(child.Id, out var childState))
+                    foreach (var child in _hierarchyManager.GetChildMacros(macroId))
                     {
-                        childState.PauseEvent.Reset();
-                        child.State = MacroState.Paused;
+                        if (_macroStates.TryGetValue(child.Id, out var childState))
+                        {
+                            childState.PauseEvent.Reset();
+                            child.State = MacroState.Paused;
+                        }
                     }
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            FrameworkLogger.Error(ex, $"PauseMacro failed for macro {macroId}");
         }
     }
 
     /// <inheritdoc/>
     public async void ResumeMacro(string macroId)
     {
-        if (_macroStates.TryGetValue(macroId, out var state))
+        try
         {
-            state.PauseEvent.Set();
-            state.Macro.State = MacroState.Running;
-            await SetPluginStates(state.Macro, false);
-
-            if (C.PropagateControlsToChildren)
+            if (_macroStates.TryGetValue(macroId, out var state))
             {
-                foreach (var child in _hierarchyManager.GetChildMacros(macroId))
+                state.PauseEvent.Set();
+                state.Macro.State = MacroState.Running;
+                await SetPluginStates(state.Macro, false);
+
+                if (C.PropagateControlsToChildren)
                 {
-                    if (_macroStates.TryGetValue(child.Id, out var childState))
+                    foreach (var child in _hierarchyManager.GetChildMacros(macroId))
                     {
-                        childState.PauseEvent.Set();
-                        child.State = MacroState.Running;
+                        if (_macroStates.TryGetValue(child.Id, out var childState))
+                        {
+                            childState.PauseEvent.Set();
+                            child.State = MacroState.Running;
+                        }
                     }
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            FrameworkLogger.Error(ex, $"ResumeMacro failed for macro {macroId}");
         }
     }
 
     /// <inheritdoc/>
     public async void StopMacro(string macroId)
     {
-        if (_macroStates.TryGetValue(macroId, out var state))
+        try
         {
-            state.CancellationSource.Cancel();
-            state.Macro.State = MacroState.Completed;
+            if (_macroStates.TryGetValue(macroId, out var state))
+            {
+                state.CancellationSource.Cancel();
+                // 🔴 必須在改 State 之前設：那個設定子是同步觸發 StateChanged 的，
+                //    設在後面等於 OnMacroStateChanged 讀到 false ⇒ 按停止也會念一句「跑完了」。
+                state.StoppedManually = true;
+                state.Macro.State = MacroState.Completed;
 
-            // rest of the cleanup will be handled by OnMacroStateChanged
-            UnregisterFunctionTriggers(state.Macro);
-            await SetPluginStates(state.Macro, true);
+                // rest of the cleanup will be handled by OnMacroStateChanged
+                UnregisterFunctionTriggers(state.Macro);
+                await SetPluginStates(state.Macro, true);
 
-            if (C.PropagateControlsToChildren)
-                foreach (var child in _hierarchyManager.GetChildMacros(macroId).ToList())
-                    StopMacro(child.Id);
+                if (C.PropagateControlsToChildren)
+                    foreach (var child in _hierarchyManager.GetChildMacros(macroId).ToList())
+                        StopMacro(child.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            FrameworkLogger.Error(ex, $"StopMacro failed for macro {macroId}");
         }
     }
 
@@ -404,6 +501,30 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     /// </summary>
     /// <param name="macroId">The ID of the macro to invalidate cache for.</param>
     public void InvalidateFunctionCache(string macroId) => _cachedFunctionNames.Remove(macroId, out _);
+
+    /// <inheritdoc/>
+    public void UnregisterDeletedMacro(IMacro macro)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+
+        if (_macroStates.ContainsKey(macro.Id))
+            StopMacro(macro.Id);
+
+        // Unsubscribe using the same paths used to subscribe, so any per-trigger-type
+        // side effects (AutoRetainer API disposal, addon listener removal, etc.) unwind too.
+        foreach (var triggerEvent in macro.Metadata.TriggerEvents.ToList())
+            UnsubscribeFromTriggerEvent(macro, triggerEvent);
+
+        // Safety net for any registration not reflected in current metadata (e.g. stale from a prior edit).
+        _triggerEventManager.UnregisterAllTriggers(macro);
+        UnregisterFunctionTriggers(macro);
+
+        macro.ContentChanged -= OnMacroContentChanged;
+
+        CleanupMacro(macro.Id);
+
+        FrameworkLogger.Debug($"Unregistered triggers and cleaned up deleted macro {macro.Name} ({macro.Id})");
+    }
 
     /// <inheritdoc/>
     public void StopAllMacros() => _enginesByMacroId.Keys.Each(StopMacro);
@@ -507,11 +628,24 @@ public class MacroScheduler : IMacroScheduler, IDisposable
         return (missingDependencies.Count == 0, missingDependencies);
     }
 
+    /// <summary><paramref name="state"/> 為 <see langword="false"/> 壓制、<see langword="true"/> 還原。</summary>
+    /// <remarks>
+    /// 🔴 卸載期<b>刻意不短路</b>：TextAdvance 的外部控制不會到期也不偵測租用者消失，
+    /// 不還原就靜默停擺到使用者自己去設定頁按取消為止。
+    /// 🔴 逐一隔離：呼叫端一律 <c>_ = StartMacro(...)</c>，例外變成沒人觀察的 Task ⇒
+    /// 一個外掛擲例外會讓後面的外掛無聲地沒被還原。
+    /// </remarks>
     private async Task SetPluginStates(IMacro macro, bool state)
     {
         foreach (var name in macro.Metadata.PluginsToDisable)
         {
-            if (_disableablePlugins.TryGetValue(name, out var plugin))
+            if (!_disableablePlugins.TryGetValue(name, out var plugin))
+            {
+                FrameworkLogger.Warning($"Plugin {name} is not registered as disableable");
+                continue;
+            }
+
+            try
             {
                 if (state)
                 {
@@ -524,24 +658,55 @@ public class MacroScheduler : IMacroScheduler, IDisposable
                     await plugin.DisableAsync();
                 }
             }
-            else
-                FrameworkLogger.Warning($"Plugin {name} is not registered as disableable");
+            catch (Exception ex)
+            {
+                var what = state ? "還原" : "壓制";
+                FrameworkLogger.Info($"[{macro.Name}] {what} {name} 失敗（{ex.GetType().Name}：{ex.Message}），其餘插件照常處理");
+            }
         }
     }
 
-    private class MacroExecutionState(IMacro macro)
+    private class MacroExecutionState(IMacro macro) : IMacroInstance
     {
         public IMacro Macro { get; } = macro;
         public bool PauseAtLoop { get; set; }
         public bool StopAtLoop { get; set; }
+
+        /// <summary>
+        /// 這支巨集是被<b>使用者按停</b>的（停止鈕、<c>/snd stop</c>、刪掉巨集、全艦隊急停），
+        /// 不是自己跑到結束的。
+        /// </summary>
+        /// <remarks>
+        /// 🔴 設它的是 <see cref="StopMacro"/> 與 <c>RunMacroAsync</c> 攔到刻意停止（含卸載）的分支；必須在把 <c>Macro.State</c> 改成
+        /// <c>Completed</c> <b>之前</b>設——那個設定子是<b>同步</b>觸發 <c>StateChanged</c> 的，
+        /// 順序反過來的話 <c>OnMacroStateChanged</c> 讀到的還是 <see langword="false"/>，
+        /// 而失敗形式是「按停止也會念一句『跑完了』」。
+        /// <para>
+        /// 📌 <c>CheckLoopStop</c>／<c>OnLoopControlRequested</c>（「跑完這一圈就停」）刻意<b>不</b>設：
+        /// 那是使用者事先排好的收工方式，對「人不在鍵盤前」來說就是跑完了。
+        /// </para>
+        /// </remarks>
+        public bool StoppedManually { get; set; }
         public CancellationTokenSource CancellationSource { get; } = new CancellationTokenSource();
         public ManualResetEventSlim PauseEvent { get; } = new ManualResetEventSlim(true);
         public Task? ExecutionTask { get; set; }
 
+        /// <remarks>
+        /// <see cref="PauseEvent"/> 刻意不釋放：引擎可能還在別的執行緒上等它，釋放後那邊擲 <see cref="ObjectDisposedException"/>
+        /// （沒用到 <c>WaitHandle</c> 就不持有原生資源）。暫停中的巨集先取消：否則那條等待永遠醒不來，或被放行後在卸載後繼續動作。
+        /// </remarks>
         public void Dispose()
         {
+            try
+            {
+                if (!PauseEvent.IsSet)
+                    CancellationSource.Cancel();
+            }
+            catch (Exception ex)
+            {
+                FrameworkLogger.Warning($"Cancelling paused macro {Macro.Name} on dispose failed: {ex.Message}");
+            }
             CancellationSource.Dispose();
-            PauseEvent.Dispose();
         }
     }
 
@@ -577,7 +742,10 @@ public class MacroScheduler : IMacroScheduler, IDisposable
                 temp.StateChanged -= OnMacroStateChanged;
             }
 
-            if (_macroStates.Remove(e.MacroId, out var state))
+            var hadState = _macroStates.Remove(e.MacroId, out var state);
+            var stoppedManually = state?.StoppedManually ?? false;
+            var macroName = state?.Macro.Name;
+            if (hadState && state != null)
             {
                 UnregisterFunctionTriggers(state.Macro);
                 state.CancellationSource.Cancel();
@@ -587,7 +755,51 @@ public class MacroScheduler : IMacroScheduler, IDisposable
             }
 
             _enginesByMacroId.Remove(e.MacroId, out _);
+
+            NotifyTataruPraise(sender, e, hadState, stoppedManually, macroName);
         }
+    }
+
+    /// <summary>
+    /// 巨集結束時請「塔塔露誇獎」念一句。
+    /// </summary>
+    /// <param name="sender">觸發狀態變更的巨集物件。</param>
+    /// <param name="e">狀態變更事件。</param>
+    /// <param name="hadState">這一次狀態變更有沒有真的從 <c>_macroStates</c> 取下一筆執行狀態。</param>
+    /// <param name="stoppedManually">是不是被使用者按停的（見 <c>MacroExecutionState.StoppedManually</c>）。</param>
+    /// <param name="macroName">巨集名稱，只寫進記錄。</param>
+    /// <remarks>
+    /// 🔴 本外掛對「巨集跑完了」<b>沒有任何使用者看得見的輸出</b>（<see cref="MacroStateChanged"/>
+    /// 在整個外掛裡一個訂閱端都沒有），所以掛著巨集離開鍵盤的人根本不知道它結束了。這裡補上聲音。
+    /// <para>
+    /// 🔴 三道閘門，缺一就會變成洗版或報錯事：
+    /// ①<b>子巨集不算</b>（<c>sender is TemporaryMacro</c>）：一支巨集裡可能跑幾十次，子巨集出錯也已經傳播成母巨集的 <c>Error</c>。
+    /// ②<b>沒取到執行狀態就不算</b>（<paramref name="hadState"/>）：巨集出錯時會先走一次 <c>Error</c>（那一次把狀態取下來了），
+    /// 接著 <c>RunMacroAsync</c> 收尾又把它設成 <c>Completed</c> ⇒ 同一支巨集會連續來兩個事件；第二次取不到狀態，拿它當去重的判準。
+    /// ③<b>使用者按停不算</b>（<paramref name="stoppedManually"/>）：那時候人就在鍵盤前面。「跑完這一圈就停」<b>不</b>設這個旗標，它算跑完。
+    /// </para>
+    /// <para>
+    /// 📌 出錯走的是「需要幫忙」情境、不是「巨集完成」——兩件事念同一句話等於沒講。
+    /// ⚠️ 這條路徑常常在<b>執行緒池</b>上（<c>await state.ExecutionTask</c> 之後），
+    /// 排到 framework 執行緒是 <see cref="TataruPraiseIPC"/> 內部做的。
+    /// </para>
+    /// </remarks>
+    private static void NotifyTataruPraise(object? sender, MacroStateChangedEventArgs e, bool hadState, bool stoppedManually, string? macroName)
+    {
+        if (sender is TemporaryMacro) return;
+        if (!hadState) return;
+
+        var name = macroName ?? e.MacroId;
+
+        if (e.NewState == MacroState.Error)
+        {
+            TataruPraiseIPC.TryPraiseMacroError($"巨集「{name}」出錯停下");
+            return;
+        }
+
+        if (stoppedManually) return;
+
+        TataruPraiseIPC.TryPraiseMacroDone($"巨集「{name}」跑完");
     }
 
     private void OnMacroContentChanged(object? sender, MacroContentChangedEventArgs e)
@@ -601,6 +813,14 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     {
         if (sender is IMacro macro)
         {
+            if (macro is ConfigMacro && C.GetMacro(macro.Id) is null) // orphaned ConfigMacro
+            {
+                // don't run triggers for orphaned macros, unregister them
+                FrameworkLogger.Warning($"Skipping trigger event {e.EventType} for deleted macro {macro.Name} ({macro.Id}); unregistering orphaned triggers");
+                _triggerEventManager.UnregisterAllTriggers(macro);
+                return;
+            }
+
             if (_macroStates.ContainsKey(macro.Id))
             {
                 FrameworkLogger.Debug($"Skipping trigger event for macro {macro.Name} - cannot start");
@@ -688,6 +908,7 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     }
 
     private HashSet<string> _activePlugins = [];
+    private bool _activePluginsBaselineStale;
     private long _combatStart = 0;
     private void OnFrameworkUpdate(IFramework framework)
     {
@@ -714,8 +935,29 @@ public class MacroScheduler : IMacroScheduler, IDisposable
             }
         }
 
+        if (_triggerEventManager.EventHandlers.TryGetValue(TriggerEvent.OnActivePluginsChanged, out var pluginHandlers) && pluginHandlers.Count > 0)
+            TrackActivePlugins();
+        else
+            _activePluginsBaselineStale = true;
+
+        _ = _triggerEventManager.RaiseTriggerEvent(TriggerEvent.OnUpdate);
+    }
+
+    /// <summary>
+    /// 沒有巨集訂閱 OnActivePluginsChanged 時整段不跑（每幀抓插件清單的配置量），
+    /// 之後第一次有人訂閱時只把當下清單記成基準、不發事件。
+    /// </summary>
+    private void TrackActivePlugins()
+    {
         var lastActivePlugins = _activePlugins;
         var currentActivePlugins = Svc.PluginInterface.InstalledPlugins.Where(p => p.IsLoaded).Select(p => p.InternalName).ToHashSet();
+        _activePlugins = currentActivePlugins;
+        if (_activePluginsBaselineStale)
+        {
+            _activePluginsBaselineStale = false;
+            return;
+        }
+
         lastActivePlugins.SymmetricExceptWith(currentActivePlugins);
         if (lastActivePlugins.Count > 0)
         {
@@ -726,9 +968,6 @@ public class MacroScheduler : IMacroScheduler, IDisposable
             _ = _triggerEventManager.RaiseTriggerEvent(TriggerEvent.OnActivePluginsChanged, new { eventData });
             FrameworkLogger.Verbose($"[{nameof(TriggerEvent.OnActivePluginsChanged)}] fired [{string.Join(", ", diffs)}]");
         }
-        _activePlugins = currentActivePlugins;
-
-        _ = _triggerEventManager.RaiseTriggerEvent(TriggerEvent.OnUpdate);
     }
 
     private record class PluginWrapper
@@ -761,8 +1000,13 @@ public class MacroScheduler : IMacroScheduler, IDisposable
 
     private void OnChatMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
     {
-        var eventData = new Dictionary<string, object> { { "type", type }, { "timestamp", timestamp }, { "sender", sender.TextValue }, { "message", message.TextValue }, { "isHandled", isHandled } };
-        FrameworkLogger.Verbose($"[{nameof(OnChatMessage)}] fired [{type}, {timestamp}, {sender}, {message}, {isHandled}]");
+        // 沒有巨集在聽 OnChatMessage 時不組參數表（RaiseTriggerEvent 本來就會直接返回）；有人聽時給的參數與原本逐項相同。
+        if (FrameworkLogger.VerboseEnabled)
+            FrameworkLogger.Verbose($"[{nameof(OnChatMessage)}] fired [{type}, {timestamp}, {sender}, {message}, {isHandled}]");
+        if (!_triggerEventManager.EventHandlers.TryGetValue(TriggerEvent.OnChatMessage, out var chatHandlers) || chatHandlers.Count == 0)
+            return;
+
+        var eventData = new Dictionary<string, object>(5) { { "type", type }, { "timestamp", timestamp }, { "sender", sender.TextValue }, { "message", message.TextValue }, { "isHandled", isHandled } };
         _ = _triggerEventManager.RaiseTriggerEvent(TriggerEvent.OnChatMessage, eventData);
     }
 
@@ -799,22 +1043,48 @@ public class MacroScheduler : IMacroScheduler, IDisposable
 
     private void CheckCharacterPostProcess(IMacro macro)
     {
-        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.ClientState.LocalContentId))
+        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.PlayerState.ContentId))
+        {
             FrameworkLogger.Info($"Skipping post process macro {macro.Name} for current character.");
-        else
+            return;
+        }
+
+        // AutoRetainer 是在同一次框架更新裡把登記表清空、再一口氣「同步」廣播給所有訂閱者的
+        // （TaskPostprocessCharacterIPC 的第一個任務裡 Clear() 之後直接 SendMessage），
+        // 所以「同一次框架更新」正好就是一輪登記的範圍。
+        var tick = Svc.Framework.LastUpdateUTC;
+        if (_arCharacterPostProcessRequestedTick == tick)
+        {
+            FrameworkLogger.Info($"這一輪已經向 AutoRetainer 登記過角色後處理，巨集 {macro.Name} 不再重複登記（一次登記就涵蓋所有已訂閱的巨集，它照樣會被執行）。");
+            return;
+        }
+
+        try
+        {
             _arApis[macro.Id].RequestCharacterPostprocess();
+            _arCharacterPostProcessRequestedTick = tick;
+        }
+        catch (TargetInvocationException ex)
+        {
+            // 🔴 AutoRetainer 的提供端實作自己擲的例外，會被 Dalamud CallGate 的 DynamicInvoke
+            //    包成 TargetInvocationException —— 慣用的 catch (IpcError) 攔不到它。
+            //    這裡只攔這一種（不要裸 catch (Exception)，那會連該炸的東西一起吞掉），
+            //    而且不靜默：登記被拒一定要讓使用者在 log 上看得見。
+            _arCharacterPostProcessRequestedTick = tick;
+            FrameworkLogger.Info($"AutoRetainer 拒絕了巨集 {macro.Name} 的角色後處理登記：{ex.InnerException?.Message ?? ex.Message}。若本插件這一輪已經登記過，該巨集仍然會被執行。");
+        }
     }
 
     private void DoCharacterPostProcess(IMacro macro)
     {
-        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.ClientState.LocalContentId))
+        if (C.ARCharacterPostProcessExcludedCharacters.Any(x => x == Svc.PlayerState.ContentId))
         {
             FrameworkLogger.Info($"Skipping post process macro {macro.Name} for current character.");
             return;
         }
 
         FrameworkLogger.Info($"Executing post process macro {macro.Name} for current character.");
-        var eventData = new Dictionary<string, object> { { "Id", Svc.ClientState.LocalContentId }, { "Name", Svc.ClientState.LocalPlayer?.Name.TextValue ?? string.Empty } };
+        var eventData = new Dictionary<string, object> { { "Id", Svc.PlayerState.ContentId }, { "Name", Svc.Objects.LocalPlayer?.Name.TextValue ?? string.Empty } };
         _ = _triggerEventManager.RaiseTriggerEvent(TriggerEvent.OnAutoRetainerCharacterPostProcess, eventData);
     }
 

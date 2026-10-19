@@ -35,22 +35,15 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
         public IMacro Macro { get; } = macro;
         public CancellationTokenSource CancellationSource { get; } = new CancellationTokenSource();
         public Task? ExecutionTask { get; set; }
-        public ManualResetEventSlim PauseEvent { get; } = new ManualResetEventSlim(true);
-        public bool PauseAtLoop { get; set; } = false;
-        public bool StopAtLoop { get; set; } = false;
         public List<IMacroCommand> Commands { get; set; } = [];
         public int LoopCount { get; set; }
         public int CurrentLoop { get; set; }
 
-        public void Dispose()
-        {
-            CancellationSource.Dispose();
-            PauseEvent.Dispose();
-        }
+        public void Dispose() => CancellationSource.Dispose();
     }
 
     /// <inheritdoc/>
-    public async Task StartMacro(IMacro macro, CancellationToken token, TriggerEventArgs? triggerArgs = null, int loopCount = 0)
+    public async Task StartMacro(IMacro macro, IMacroInstance instance, CancellationToken token, TriggerEventArgs? triggerArgs = null, int loopCount = 0)
     {
         var state = new MacroExecutionState(macro)
         {
@@ -61,7 +54,7 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
 
         try
         {
-            state.ExecutionTask = ExecuteMacro(state, token);
+            state.ExecutionTask = ExecuteMacro(state, instance, token);
             await state.ExecutionTask;
         }
         catch (Exception ex)
@@ -71,7 +64,7 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
         }
     }
 
-    private async Task ExecuteMacro(MacroExecutionState state, CancellationToken externalToken)
+    private async Task ExecuteMacro(MacroExecutionState state, IMacroInstance instance, CancellationToken externalToken)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(externalToken, state.CancellationSource.Token);
         var token = linkedCts.Token;
@@ -88,21 +81,8 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
                     token.ThrowIfCancellationRequested();
 
                     // Wait if paused
-                    state.PauseEvent.Wait(token);
-
-                    // Check for loop pause/stop
-                    if (state.PauseAtLoop)
-                    {
-                        state.PauseAtLoop = false;
-                        state.PauseEvent.Reset();
-                    }
-
-                    if (state.StopAtLoop)
-                    {
-                        state.StopAtLoop = false;
-                        state.CancellationSource.Cancel();
-                        return;
-                    }
+                    // 「跑完這圈就暫停／停止」刻意不在這裡逐步檢查：那會變成「下一步就停」，交給排程器在 /loop 那一步處理。
+                    await MacroPause.WaitWhilePausedAsync(instance.PauseEvent, token);
 
                     var command = state.Commands[currentStep];
                     var context = new MacroContext(state.Macro);
@@ -114,7 +94,11 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
                         LoopControlRequested?.Invoke(this, e);
 
                     if (command.RequiresFrameworkThread)
+                    {
+                        // 卸載窗內這個轉派會就地跑在呼叫端執行緒上，等於沒有轉派。
+                        FrameworkUnloadGuard.ThrowIfUnloading(state.Macro.Name, token);
                         await Svc.Framework.RunOnTick(() => command.Execute(context, token), cancellationToken: token);
+                    }
                     else
                         await command.Execute(context, token);
 
@@ -131,6 +115,8 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
                 state.CurrentLoop++;
             }
         }
+        // 契約：這裡只結束迴圈、不設任何狀態——巨集狀態一律由 MacroScheduler 收尾設成 Completed。
+        // ⚠️ 非刻意的取消（逾時）走到這裡也會被同樣吞掉，收成「跑完了」：目前唯一一條是 ActionCommand 的 SmartWait 五秒逾時。
         catch (OperationCanceledException) { }
         catch (MacroGateCompleteException) { }
         catch (Exception ex)
@@ -141,7 +127,11 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
     }
 
     /// <inheritdoc/>
-    public Task StartMacro(IMacro macro) => StartMacro(macro, CancellationToken.None);
+    public async Task StartMacro(IMacro macro)
+    {
+        using var instance = new DetachedMacroInstance(macro);
+        await StartMacro(macro, instance, CancellationToken.None);
+    }
 
     protected virtual void OnMacroError(string macroId, string message, Exception? ex = null)
     {
@@ -159,7 +149,7 @@ public class NativeMacroEngine(MacroParser parser) : IMacroEngine
 
         var craftCount = macro.Metadata.CraftLoopCount;
         var contents = macro.ContentSansMetadata();
-        var inRecipeNote = Svc.GameGui.GetAddonByName("RecipeNote") != IntPtr.Zero;
+        var inRecipeNote = Svc.GameGui.GetAddonByName("RecipeNote").Address != IntPtr.Zero;
         if (C.UseCraftLoopTemplate)
         {
             var template = C.CraftLoopTemplate;

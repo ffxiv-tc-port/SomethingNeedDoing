@@ -5,7 +5,7 @@ namespace SomethingNeedDoing.External;
 public class Lifestream : IPC
 {
     public override string Name => "Lifestream";
-    public override string Repo => Repos.Limiana;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC]
     [LuaFunction(
@@ -37,9 +37,14 @@ public class Lifestream : IPC
     public Action<string, bool, string, bool, int?, bool?, bool?> TPAndChangeWorld = null!;
 
     [EzIPC]
-    [LuaFunction(parameterDescriptions: ["territoryType"])]
+    [LuaFunction(
+        description: "Gets the world-change aetheryte for a territory. Returns nil when that territory has none.",
+        parameterDescriptions: ["territoryType"])]
     [Changelog("12.12")]
-    public Func<int?> GetWorldChangeAetheryteByTerritoryType = null!;
+    // 🔴 提供端是 Func<uint, int?>（Lifestream 的 IPCProvider.GetWorldChangeAetheryteByTerritoryType），參數個數必須一致：
+    //    Dalamud 的 CallGateChannel.CheckAndConvertArgs 比的是委派的參數個數，個數不合就擲 IpcLengthMismatchError。
+    //    查不到乙太之光時提供端回 null，到 Lua 就是 nil。
+    public Func<uint, int?> GetWorldChangeAetheryteByTerritoryType = null!;
 
     [EzIPC]
     [LuaFunction(parameterDescriptions: ["world"])]

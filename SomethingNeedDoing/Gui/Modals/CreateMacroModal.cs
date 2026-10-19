@@ -1,5 +1,6 @@
 ﻿using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Managers;
 using System.Threading.Tasks;
 
@@ -14,6 +15,8 @@ public class CreateMacroModal(GitMacroManager gitManager)
     private static string _githubUrl = "";
     private static bool _isImporting = false;
     private static string _importError = "";
+    // 匯入的續作跑在執行緒池，不能在那裡呼叫 ImGui；只設這個旗標，由下一幀的 DrawModal 關窗。
+    private static volatile bool _closeRequested = false;
 
     public void Open()
     {
@@ -22,6 +25,7 @@ public class CreateMacroModal(GitMacroManager gitManager)
         _newMacroType = MacroType.Native;
         _githubUrl = "";
         _importError = "";
+        _closeRequested = false;
     }
 
     public void Close()
@@ -42,14 +46,20 @@ public class CreateMacroModal(GitMacroManager gitManager)
         using var style = ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(15, 15));
         using var popup = ImRaii.PopupModal($"CreateMacroPopup##{nameof(CreateMacroModal)}", ref IsOpen, ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoTitleBar);
         if (!popup) return;
+        if (_closeRequested)
+        {
+            _closeRequested = false;
+            Close();
+            return;
+        }
 
         ImGuiEx.Icon(FontAwesomeHelper.IconNew);
         ImGui.SameLine();
-        ImGui.Text("Create New Macro");
+        ImGui.Text("Create New Macro".Loc());
         ImGui.Separator();
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("Name:");
+        ImGui.Text("Name:".Loc());
 
         ImGui.SameLine();
         ImGuiUtils.SetFocusIfAppearing();
@@ -59,19 +69,19 @@ public class CreateMacroModal(GitMacroManager gitManager)
         ImGui.Spacing();
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("Type:");
+        ImGui.Text("Type:".Loc());
         ImGui.SameLine();
 
         _newMacroType = ImGuiUtils.EnumRadioButtons(_newMacroType);
 
         ImGui.Spacing();
 
-        ImGuiUtils.Section("Optional: Import from Github", () =>
+        ImGuiUtils.Section("Optional: Import from Github".Loc(), () =>
         {
             ImGui.AlignTextToFramePadding();
-            ImGui.Text("GitHub URL:");
+            ImGui.Text("GitHub URL:".Loc());
             ImGui.SameLine();
-            ImGuiEx.Tooltip("Enter a GitHub URL (e.g., https://github.com/owner/repo/blob/branch/path)");
+            ImGuiEx.Tooltip("Enter a GitHub URL (e.g., https://github.com/owner/repo/blob/branch/path)".Loc());
 
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             ImGui.InputText("##GitHubUrl", ref _githubUrl, 500);
@@ -87,13 +97,13 @@ public class CreateMacroModal(GitMacroManager gitManager)
         ImGui.Spacing();
 
         if (_isImporting)
-            ImGuiUtils.CenteredButtons(("Importing...", () => { }));
+            ImGuiUtils.CenteredButtons(("Importing...".Loc(), () => { }));
         else
         {
-            ImGuiUtils.CenteredButtons(("Create", async () =>
+            ImGuiUtils.CenteredButtons(("Create".Loc(), () =>
             {
                 if (!string.IsNullOrWhiteSpace(_githubUrl))
-                    await ImportFromGitHub();
+                    _ = ImportFromGitHub();
                 else
                 {
                     var uniqueName = C.GetUniqueMacroName(_newMacroName);
@@ -110,10 +120,11 @@ public class CreateMacroModal(GitMacroManager gitManager)
                     Close();
                 }
             }
-            ), ("Cancel", Close));
+            ), ("Cancel".Loc(), Close));
         }
     }
 
+    // 呼叫端不等待；例外在方法內收掉。
     private async Task ImportFromGitHub()
     {
         _isImporting = true;
@@ -130,11 +141,11 @@ public class CreateMacroModal(GitMacroManager gitManager)
 
             macro.Type = _newMacroType;
             C.Save();
-            Close();
+            _closeRequested = true;
         }
         catch (Exception ex)
         {
-            _importError = $"Failed to import from GitHub: {ex.Message}";
+            _importError = "Failed to import from GitHub: ??".Loc(ex.Message);
             FrameworkLogger.Error(ex, "Failed to import macro from GitHub");
         }
         finally

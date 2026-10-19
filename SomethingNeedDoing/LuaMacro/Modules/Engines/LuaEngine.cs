@@ -29,8 +29,9 @@ public class LuaEngine : IEngine
     {
         try
         {
-            var tempMacro = new TemporaryMacro(content);
-            await _luaEngine.StartMacro(tempMacro, cancellationToken);
+            var tempMacro = new TemporaryMacro(content) { Type = MacroType.Lua };
+            using var instance = new DetachedMacroInstance(tempMacro);
+            await _luaEngine.StartMacro(tempMacro, instance, cancellationToken);
         }
         catch (Exception ex)
         {

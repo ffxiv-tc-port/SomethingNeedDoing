@@ -20,10 +20,14 @@ public class InteractCommand(string text) : MacroCommandBase(text)
     {
         await context.RunOnFramework(() =>
         {
-            if (Game.Interact(Svc.Targets.Target))
-                FrameworkLogger.Debug($"Interacting with [{Svc.Targets.Target?.Address:X}] {Svc.Targets.Target?.Name}");
+            var target = Svc.Targets.Target;
+            if (target == null && ErrorIfModifier?.Condition == Modifiers.ErrorCondition.TargetNotFound)
+                throw new MacroException("Could not find target");
+
+            if (Game.Interact(target))
+                FrameworkLogger.Debug($"Interacting with [{target?.Address:X}] {target?.Name}");
             else
-                FrameworkLogger.Warning($"Failed to interact with target.");
+                FrameworkLogger.Warning("No target to interact with.");
         });
 
         await PerformWait(token);

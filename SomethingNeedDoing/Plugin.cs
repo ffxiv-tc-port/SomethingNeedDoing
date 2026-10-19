@@ -22,6 +22,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         P = this;
         ECommonsMain.Init(pluginInterface, this, Module.ObjectFunctions, Module.DalamudReflector);
+        ECommons.LanguageHelpers.Localization.Init("ChineseTraditional");
+        CallbackNotifier.Init();
 
         EzConfig.DefaultSerializationFactory = new ConfigFactory();
         C = EzConfig.Init<Config>();

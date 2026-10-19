@@ -6,7 +6,7 @@ namespace SomethingNeedDoing.External;
 public class Navmesh : IPC
 {
     public override string Name => "vnavmesh";
-    public override string Repo => Repos.Veyn;
+    public override string Repo => Repos.TcPort;
 
     [EzIPC("Nav.%m")]
     [LuaFunction(description: "Checks if the navmesh is ready")]

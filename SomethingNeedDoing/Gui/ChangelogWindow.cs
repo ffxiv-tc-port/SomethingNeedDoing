@@ -1,6 +1,7 @@
 ﻿using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Documentation;
 using System.Reflection;
 
@@ -83,7 +84,7 @@ public class ChangelogWindow : Window
 
     private void Add(string version, string description)
     {
-        var attr = new ChangelogAttribute(version, ChangelogType.Changed, description);
+        var attr = new ChangelogAttribute(version, ChangelogType.Changed, description.Loc());
         var entry = new ChangelogEntry(attr, "General", typeof(ChangelogWindow), "General", null);
 
         if (!_versionedGroups.TryGetValue(version, out var classGroups))
@@ -124,7 +125,7 @@ public class ChangelogWindow : Window
         {
             var flags = P.Version == version ? ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.CollapsingHeader : ImGuiTreeNodeFlags.CollapsingHeader;
             using (ImRaii.PushColor(ImGuiCol.Text, EzColor.Green.Vector4, flags.HasFlag(ImGuiTreeNodeFlags.DefaultOpen)))
-                if (!ImGui.CollapsingHeader($"Version {version}", flags)) continue;
+                if (!ImGui.CollapsingHeader("Version ??".Loc(version), flags)) continue;
             var classGroups = _versionedGroups[version];
             var classGroupDict = classGroups.ToDictionary(cg => cg.ClassName, cg => cg);
             var usedAsReturnType = classGroups.SelectMany(cg => cg.Members.Values)

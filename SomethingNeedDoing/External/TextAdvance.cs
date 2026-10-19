@@ -3,10 +3,10 @@ using SomethingNeedDoing.Core.Interfaces;
 using System.Threading.Tasks;
 
 namespace SomethingNeedDoing.External;
-public class TextAdvance : IPC, IDisableable
+public class TextAdvance : IPC, IDisableable, IDisposable
 {
     public override string Name => "TextAdvance";
-    public override string Repo => Repos.Limiana;
+    public override string Repo => Repos.TcPort;
     public string InternalName => Name;
 
     [EzIPC]
@@ -137,5 +137,25 @@ public class TextAdvance : IPC, IDisableable
             FrameworkLogger.Error("Failed to disable plugin");
             return Task.FromResult(false);
         }
+    }
+
+    /// <summary>卸載時交回外部控制。</summary>
+    /// <remarks>
+    /// 🔴 提供端的外部控制<b>沒有逾時也不偵測租用者消失</b> ⇒ 不交回的話它的模組會一直被
+    /// 我們壓著，使用者只能自己去設定頁按「取消外部控制」。
+    /// 📌 以 requester 為鍵，對「持有者不是我們」與「沒人控制」都是 no-op，不必記帳。
+    /// </remarks>
+    public void Dispose()
+    {
+        try
+        {
+            DisableExternalControl(P.Name);
+        }
+        catch (Exception ex)
+        {
+            FrameworkLogger.Info($"卸載時交回 TextAdvance 外部控制失敗（{ex.GetType().Name}），多半是它已經先卸載了");
+        }
+
+        GC.SuppressFinalize(this);
     }
 }

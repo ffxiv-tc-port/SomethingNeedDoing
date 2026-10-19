@@ -45,10 +45,18 @@ public class NativeEngine(MacroParser parser) : IEngine
                     LoopControlRequested?.Invoke(this, e);
 
                 if (command.RequiresFrameworkThread)
+                {
+                    // 卸載窗內這個轉派會就地跑在呼叫端執行緒上，等於沒有轉派。
+                    FrameworkUnloadGuard.ThrowIfUnloading(tempMacro.Name, cancellationToken);
                     await Svc.Framework.RunOnTick(() => command.Execute(context, cancellationToken), cancellationToken: cancellationToken);
+                }
                 else
                     await command.Execute(context, cancellationToken);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

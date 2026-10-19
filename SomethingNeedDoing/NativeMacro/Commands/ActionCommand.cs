@@ -63,7 +63,7 @@ public class ActionCommand(string text, string actionName) : MacroCommandBase(te
                     }
                 }
 
-                if (C.QualitySkip && Game.Crafting.IsMaxQuality() && craftAction.IncreasesQuality)
+                if (C.QualitySkip && Game.Crafting.IsMaxQuality() && craftAction.IncreasesQuality && !craftAction.IncreasesProgress) // 同時推進度的技能不能跳過
                 {
                     FrameworkLogger.Debug($"Max quality skip: {CommandText}");
                     return;
@@ -88,7 +88,9 @@ public class ActionCommand(string text, string actionName) : MacroCommandBase(te
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, token);
                 await craftingComplete.Task.WaitAsync(linkedCts.Token);
             }
-            catch (TimeoutException)
+            // 契約：五秒逾時由 Task.WaitAsync(token) 發出 ⇒ 擲的是 TaskCanceledException，不是 TimeoutException。
+            // 巨集自己的 token 被取消（使用者按停止、卸載）不算逾時，原樣往外冒。
+            catch (Exception ex) when (ex is TimeoutException || (ex is OperationCanceledException && !token.IsCancellationRequested))
             {
                 if (C.StopOnError || ErrorIfModifier?.Condition == Modifiers.ErrorCondition.ActionTimeout)
                     throw new MacroTimeoutException("Did not receive a timely response");

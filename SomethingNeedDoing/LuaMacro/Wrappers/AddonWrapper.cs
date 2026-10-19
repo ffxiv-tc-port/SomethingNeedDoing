@@ -1,13 +1,40 @@
-﻿using FFXIVClientStructs.FFXIV.Component.GUI;
+﻿using Dalamud.Memory;
+using ECommons.Automation.UIInput;
+using ECommons.UIHelpers;
+using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using FFXIVClientStructs.Interop;
 using SomethingNeedDoing.Core.Interfaces;
+using ValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
 
 namespace SomethingNeedDoing.LuaMacro.Wrappers;
 public unsafe class AddonWrapper(string name) : IWrapper
 {
-    private AtkUnitBase* Addon => (AtkUnitBase*)Svc.GameGui.GetAddonByName(name);
-    private Pointer<AtkResNode>[] NodeList => Addon->UldManager.Nodes.ToArray();
-    private AtkValue[] AtkValuesList => Addon->AtkValuesSpan.ToArray();
+    private AtkUnitBase* Addon => (AtkUnitBase*)Svc.GameGui.GetAddonByName(name).Address;
+
+    // 🔴 這些包裝是 Lua 巨集直接叫得到的:視窗沒開、或在腳本兩行之間被關掉時,Addon 就是空指標,
+    // 而 Span 的建構子不會驗指標,ToArray() 會直接從空位址複製 → AccessViolationException。
+    // AVE 是 corrupted-state exception,try/catch 與任何例外隔離都攔不到,只能在讀取前擋。
+    // 讀不到就回空集合(視窗不在 = 沒有節點),與 Exists / Ready 回報的狀態一致。
+    private Pointer<AtkResNode>[] NodeList
+    {
+        get
+        {
+            var addon = Addon;
+            if (addon == null || addon->UldManager.NodeList == null) return [];
+            return addon->UldManager.Nodes.ToArray();
+        }
+    }
+
+    private AtkValue[] AtkValuesList
+    {
+        get
+        {
+            var addon = Addon;
+            if (addon == null || addon->AtkValues == null) return [];
+            return addon->AtkValuesSpan.ToArray();
+        }
+    }
 
     [LuaDocs(description: "Check if the Addon Exists, regardless of visibility.")] public bool Exists => Addon != null;
     [LuaDocs(description: "Check if the Addon is Visible and Ready.")]
@@ -20,47 +47,332 @@ public unsafe class AddonWrapper(string name) : IWrapper
         }
     }
 
-    [LuaDocs] public AtkValueWrapper GetAtkValue(int index) => new(Addon->AtkValues[index]);
+    [LuaDocs(description: "Reads one AtkValue by index. Returns an empty value if the addon is not open or the index is out of range.")]
+    public AtkValueWrapper GetAtkValue(int index)
+    {
+        // 沒有邊界檢查時,index 超出 AtkValuesCount 讀的是配置外的記憶體。
+        var addon = Addon;
+        if (addon == null || addon->AtkValues == null || index < 0 || index >= addon->AtkValuesCount)
+            return new AtkValueWrapper(default);
+        return new(addon->AtkValues[index]);
+    }
 
+    // 🔴 刻意不寫成 yield return 的惰性迭代器:AtkValuesList 那份快照裡的每一格都還帶著原生字串指標,
+    //    惰性的話包裝物件是在「呼叫端往前走一步」的那一刻才建構的 —— Lua 端把這個序列存起來、隔幾幀再走完,
+    //    讀到的就是已經失效的指標。當場走完,整個原生讀取收斂在取得這個屬性的那一幀之內。
     [LuaDocs]
     public unsafe IEnumerable<AtkValueWrapper> AtkValues
     {
         get
         {
-            foreach (var v in AtkValuesList)
-                yield return new AtkValueWrapper(v);
+            var values = AtkValuesList;
+            var list = new List<AtkValueWrapper>(values.Length);
+            foreach (var v in values)
+                list.Add(new AtkValueWrapper(v));
+            return list;
         }
     }
 
-    [LuaDocs] public NodeWrapper GetNode(params int[] nodeIds) => new(Addon, nodeIds);
+    [LuaDocs(description: "Gets all non-empty string values from the addon's AtkValues, in order. Icon/link payloads are stripped.")]
+    public List<string> GetValueTexts() => [.. AtkValuesList.Where(AtkValueText.HasText).Select(AtkValueText.Get)];
+
+    [LuaDocs(description: "Same as GetValueTexts, but keeps the raw bytes: SeString icon/link payloads are NOT stripped.")]
+    public List<string> GetValueTextsRaw() => [.. AtkValuesList.Select(v => v.GetValueAsString()).Where(s => !string.IsNullOrEmpty(s))];
+
+    [LuaDocs(description: "Dumps every node's id/type/visibility/text, for diagnosing an addon's node layout.")]
+    public List<string> DumpNodes()
+    {
+        var list = new List<string>();
+        // 函式位址沒解出(改版後特徵碼對不上)時:text 留空、visible 印 ?,不擲例外。
+        var canReadText = GameStatics.Resolved(AtkResNode.MemberFunctionPointers.GetAsAtkTextNode, "AtkResNode.GetAsAtkTextNode");
+        var canReadVisible = GameStatics.Resolved(AtkResNode.MemberFunctionPointers.IsVisible, "AtkResNode.IsVisible");
+        foreach (var node in NodeList)
+        {
+            var n = node.Value;
+            // ⚠️ 下面那個 try/catch 對空指標解參考完全無效(AccessViolationException 是
+            // corrupted-state exception),所以節點與文字節點都必須在解參考前先驗過。
+            // 空的槽位照樣列出來,免得「這一格讀不到」被看成「這一格不存在」。
+            if (n == null)
+            {
+                list.Add("id=? type=? visible=? text=? (空節點)");
+                continue;
+            }
+
+            var text = string.Empty;
+            try
+            {
+                if (canReadText && n->Type == NodeType.Text)
+                {
+                    var textNode = n->GetAsAtkTextNode();
+                    if (textNode != null)
+                        text = textNode->NodeText.GetText();
+                }
+            }
+            catch { /* not a text node or unreadable, ignore */ }
+            var visible = canReadVisible ? n->IsVisible().ToString() : "?";
+            list.Add($"id={n->NodeId} type={n->Type} visible={visible} text={text}");
+        }
+        return list;
+    }
+
+    [LuaDocs(description: "Fires a DragDropClick event with the right-click button flag on the given 'which' slot index (as seen via a ReceiveEvent hook), simulating a right-click on a drag-drop slot (e.g. the soil/seed slots in the housing gardening addon) without needing real mouse input.")]
+    public void RightClickDragDropSlot(int which)
+    {
+        var addon = Addon;
+        if (addon == null) return; // 視窗不在就這次不做事;ReceiveEvent 對空指標是攔不到的 AVE
+
+        // 🔴 毒指標交接:**取欄位位址不會解參考** —— AtkStage.Instance() 回 null 時 `&stage->AtkEventTarget` 不會當場崩,
+        // 它算出的是 `null + offsetof(AtkEventTarget)` 這個假指標,然後被原封不動交給遊戲的 ReceiveEvent,
+        // 崩潰發生在遊戲碼解參考那個假指標的時候(AccessViolation,try/catch 攔不到)。
+        // ⇒ 失敗必須在送出事件之前攔下:AtkStage.Instance() 是 isPointer 的 [StaticAddress],回傳值可能是 null,
+        // 取不到就完全不送事件(同 ECommons 的 AddonMasterBase.TryCreateAtkEvent)。
+        var stage = GameStatics.TryAtkStage();
+        if (stage == null)
+        {
+            FrameworkLogger.Error("AtkStage is unavailable; refusing to send a DragDropClick with an invalid event target.");
+            return;
+        }
+
+        var evt = new AtkEvent
+        {
+            Listener = (AtkEventListener*)addon,
+            Target = &stage->AtkEventTarget,
+            Param = (uint)which,
+        };
+        var data = new AtkEventDataBuilder().Write<byte>(6, 1).Build(); // offset 6 = AtkMouseData.ButtonId, 1 = right click
+        addon->ReceiveEvent(AtkEventType.DragDropClick, which, &evt, &data);
+    }
+
+    [LuaDocs(description: "Clicks a component button by node id, if enabled and visible. Returns true if clicked.")]
+    public bool ClickButton(uint nodeId)
+    {
+        var addon = Addon;
+        if (addon == null) return false;
+
+        // 🔴 AtkComponentButton.IsEnabled 解的是 OwnerNode,不是 AtkResNode —— 兩個是不同欄位,只驗 button 本身
+        // 擋不到 OwnerNode 為空的情況;而 AtkResNode 本身也是指標欄位,IsVisible() 一樣會裸解參考它。
+        // 所以兩條路都走 ECommons 的 null-safe 版本,任一層讀不出來就回 false(這次不按)。
+        if (!GameStatics.Resolved(AtkUnitBase.MemberFunctionPointers.GetComponentButtonById, "AtkUnitBase.GetComponentButtonById")) return false;
+        var button = addon->GetComponentButtonById(nodeId);
+        if (button == null || !IsComponentEnabled(button) || !IsComponentVisible(&button->AtkComponentBase))
+            return false;
+
+        button->ClickAddonButton(addon);
+        return true;
+    }
+
+    // 傳的是 addon 的「名字」不是「指標」:NodeWrapper 每次存取都要自己重新 GetAddonByName,
+    // 把指標交出去等於又把生命週期凍結回來。
+    [LuaDocs] public NodeWrapper GetNode(params int[] nodeIds) => new(name, nodeIds);
+
+    // 這個 helper 刻意不是 iterator:iterator 的方法體裡不能出現指標,也不能有 ref struct(Span)
+    // 的區域變數。先在這裡把每個節點的「身分」抄成純受控資料,再交給 Nodes 包成 wrapper。
+    private List<(int Index, uint NodeId)> NodeIdentities()
+    {
+        var addon = Addon;
+        if (addon == null || addon->UldManager.NodeList == null) return [];
+
+        var nodes = addon->UldManager.Nodes;
+        var list = new List<(int, uint)>(nodes.Length);
+        for (var i = 0; i < nodes.Length; i++)
+        {
+            var node = nodes[i].Value;
+            list.Add((i, node == null ? 0u : node->NodeId));
+        }
+        return list;
+    }
 
     [LuaDocs]
-    public unsafe IEnumerable<NodeWrapper> Nodes
+    public IEnumerable<NodeWrapper> Nodes
     {
         get
         {
-            foreach (var node in NodeList)
-                yield return new NodeWrapper(node);
+            var identities = NodeIdentities();
+            var result = new List<NodeWrapper>(identities.Count);
+            foreach (var (index, nodeId) in identities)
+                result.Add(NodeWrapper.FromNodeList(name, index, nodeId));
+            return result;
         }
     }
 }
 
+// 🔴 不保存 AtkResNode*:存「怎麼找到它」而不是「它在哪」,每次屬性存取重走一次解析(同 AddonWrapper.Addon 只存名稱)。
+//    巨集慣於把節點存進區域變數跨 yield 讀;節點記憶體由 addon 的 UldManager 擁有,addon 關閉會整批釋放、
+//    重開會重新配置,對釋放後的節點解參考是攔不到的 AccessViolationException。
+//    ⚠️ 判空對這件事沒有用:指標不是 null,只是不再指向那個節點。
+// 解析不到時每個屬性都回佔位值;巨集要分辨「節點不存在」與「節點值就是這樣」請先看 Exists。
+
+// 兩種解析模式:
+//   1. ID 鏈(AddonWrapper.GetNode 建立的):存 addon 名 + node id 鏈,每次重走 GetNodeByIDChain(addon->RootNode, ids)。
+//   2. 節點清單(AddonWrapper.Nodes 列舉出來的):清單裡的節點不保證能用一條父子 id 鏈從 RootNode 走到,所以存
+//      addon 名 + 建構當下的槽位 + 節點自己的 NodeId:先看那一格、驗 NodeId 一致才採用,不一致就把整份清單掃一次。
+//      ⚠️ NodeId 為 0 的節點沒有可用的身分,那時只能相信槽位(槽位對照過當下的清單長度)。
 public unsafe class NodeWrapper : IWrapper
 {
-    public NodeWrapper(AtkUnitBase* addon, params int[] nodeIds) => Node = GetNodeByIDChain(addon->RootNode, nodeIds);
-    public NodeWrapper(Pointer<AtkResNode> node) => Node = node.Value;
-    private AtkResNode* Node { get; set; }
+    private readonly string _addonName;
+    private readonly int[] _idChain;
+    private readonly int _listIndex;
+    private readonly uint _nodeId;
 
-    [LuaDocs] public uint Id => Node->NodeId;
-    [LuaDocs] public bool IsVisible => Node->IsVisible();
-    [LuaDocs] public string Text { get => Node->GetAsAtkTextNode()->NodeText.ToString(); set => Node->GetAsAtkTextNode()->NodeText.SetString(value); }
-    [LuaDocs] public NodeType NodeType => Node->Type;
+    /// <summary>ID 鏈模式:addon 名 + 從 RootNode 走下去的 node id 鏈。</summary>
+    public NodeWrapper(string addonName, params int[] nodeIds)
+    {
+        _addonName = addonName;
+        _idChain = nodeIds ?? [];
+        _listIndex = -1;
+        _nodeId = 0;
+    }
+
+    private NodeWrapper(string addonName, int listIndex, uint nodeId)
+    {
+        _addonName = addonName;
+        _idChain = [];
+        _listIndex = listIndex;
+        _nodeId = nodeId;
+    }
+
+    /// <summary>
+    /// 節點清單模式。用工廠方法而不是建構子多載:(string, int, uint) 會跟 (string, params int[])
+    /// 在呼叫端寫成整數字面值時撞號,靜默挑到錯的那個。
+    /// </summary>
+    internal static NodeWrapper FromNodeList(string addonName, int listIndex, uint nodeId) => new(addonName, listIndex, nodeId);
+
+    /// <summary>每次存取都重新解析。呼叫端一律先存進區域變數(單幀內安全),不要在同一個屬性裡讀兩次。</summary>
+    private AtkResNode* Node
+    {
+        get
+        {
+            var addon = (AtkUnitBase*)Svc.GameGui.GetAddonByName(_addonName).Address;
+            if (addon == null) return null;
+
+            // 模式 1:GetNodeByIDChain 自己會擋空節點,擋不到空的 addon —— 上面那行擋掉了。
+            if (_idChain.Length > 0)
+                return GetNodeByIDChain(addon->RootNode, _idChain);
+
+            // 模式 2:Span 的建構子不驗指標,NodeList 為 null 時索引等同從位址 0 讀。
+            if (addon->UldManager.NodeList == null) return null;
+            var nodes = addon->UldManager.Nodes;
+
+            // 快路徑:節點多半還在建構當下那一格。
+            if (_listIndex >= 0 && _listIndex < nodes.Length)
+            {
+                var hinted = nodes[_listIndex].Value;
+                if (hinted != null && (_nodeId == 0 || hinted->NodeId == _nodeId)) return hinted;
+            }
+
+            if (_nodeId == 0) return null;
+
+            // 慢路徑:清單重排了,照 NodeId 找回來。
+            for (var i = 0; i < nodes.Length; i++)
+            {
+                var candidate = nodes[i].Value;
+                if (candidate != null && candidate->NodeId == _nodeId) return candidate;
+            }
+
+            return null;
+        }
+    }
+
+    [LuaDocs(description: "Whether this wrapper still resolves to a node right now. Check this before trusting the other properties: when it is false they return placeholder values (Id 0, NodeType 0 - neither is a valid real value - empty text, not visible).")]
+    public bool Exists => Node != null;
+
+    [LuaDocs] public uint Id { get { var node = Node; return node == null ? 0u : node->NodeId; } }
+    // 函式位址沒解出(改版後特徵碼對不上)時與「節點不存在」同一組佔位值:IsVisible false、Text 空字串,寫入不動作。
+    [LuaDocs] public bool IsVisible { get { var node = Node; return node != null && GameStatics.Resolved(AtkResNode.MemberFunctionPointers.IsVisible, "AtkResNode.IsVisible") && node->IsVisible(); } }
+
+    [LuaDocs]
+    public string Text
+    {
+        get
+        {
+            var node = Node;
+            if (node == null || !GameStatics.Resolved(AtkResNode.MemberFunctionPointers.GetAsAtkTextNode, "AtkResNode.GetAsAtkTextNode")) return string.Empty;
+            var textNode = node->GetAsAtkTextNode();
+            return textNode == null ? string.Empty : textNode->NodeText.GetText();
+        }
+        set
+        {
+            var node = Node;
+            if (node == null || !GameStatics.Resolved(AtkResNode.MemberFunctionPointers.GetAsAtkTextNode, "AtkResNode.GetAsAtkTextNode")) return;
+            var textNode = node->GetAsAtkTextNode();
+            if (textNode == null || !GameStatics.Resolved(FFXIVClientStructs.FFXIV.Client.System.String.Utf8String.MemberFunctionPointers.SetString, "Utf8String.SetString")) return;
+            textNode->NodeText.SetString(value);
+        }
+    }
+
+    [LuaDocs] public NodeType NodeType { get { var node = Node; return node == null ? default : node->Type; } }
 }
 
-public class AtkValueWrapper(AtkValue value) : IWrapper
+/// <summary><c>AtkValue</c> 一格的包裝層。兩個文字成員都在建構當下就抄成受管理字串。</summary>
+/// <remarks>
+/// 🔴 不可把 <c>AtkValue</c> 結構存進欄位、留到屬性裡才讀:它 0x8 的 union 在字串型別時是 <c>CStringPointer</c>
+/// (指向原生 addon 的緩衝區)、<c>Vector</c> 型別時是 <c>StdVector&lt;AtkValue&gt;*</c>,兩者都是原生指標。
+/// 巨集慣於把包裝物件存進區域變數再跨 yield 讀它,視窗在那之間被關掉或重建,再解參考就是
+/// AccessViolationException(C# 的 try/catch 與 Lua 的 pcall 都攔不到)。
+/// 建構當下是指標唯一保證有效的時刻,所以兩個字串都是那一刻的快照,之後不再持有任何原生指標。
+/// </remarks>
+public class AtkValueWrapper : IWrapper
 {
-    private AtkValue Value = value;
+    private readonly string _valueString;
+    private readonly string _valueStringRaw;
 
-    [LuaDocs] public string ValueString => Value.GetValueAsString();
+    public AtkValueWrapper(AtkValue value)
+    {
+        _valueString = AtkValueText.Get(value);
+        _valueStringRaw = value.GetValueAsString();
+    }
 
+    [LuaDocs] public string ValueString => _valueString;
+
+    [LuaDocs(description: "The value text without stripping SeString icon/link payloads (what ValueString used to return).")]
+    public string ValueStringRaw => _valueStringRaw;
+}
+
+/// <summary>
+/// <c>AtkValue</c> 的文字讀取：字串型別剝掉 SeString payload，其餘型別原樣交回
+/// <c>GetValueAsString()</c>。
+/// </summary>
+/// <remarks>
+/// 🔴 <c>AtkValue.GetValueAsString()</c> 對 <c>String</c>／<c>ManagedString</c>／<c>String8</c>
+/// 走的是 <c>CStringPointer.ToString()</c>（<c>Encoding.UTF8.GetString(AsSpan())</c>），
+/// <b>不剝 SeString payload</b>：道具連結那種帶 0xFF 長度前綴的 payload 會解出 U+FFFD，
+/// 內嵌圖示 payload（<c>02 12 02 &lt;icon+1&gt; 03</c>）會留下一個可列印的雜字元。
+/// 這些字串是直接交給 Lua 巨集拿去 <c>find</c>／<c>Contains</c> 比對的，
+/// 而比對的另一側（使用者寫在巨集裡的字、或 Excel 表查出來的名字）是純文字，
+/// 兩側基準不同就會<b>靜默比不中</b>。
+/// <para>
+/// ⚠️ 非字串型別（<c>Bool</c>／<c>Int</c>／<c>UInt</c>／<c>Float</c>／<c>WideString</c>／
+/// <c>Pointer</c>…）一律原樣交回 <c>GetValueAsString()</c> —— 那幾條分支跟 SeString 無關，
+/// 動了才是回退行為。
+/// </para>
+/// </remarks>
+internal static unsafe class AtkValueText
+{
+    internal static bool IsStringType(AtkValue value)
+        => value.Type is ValueType.String or ValueType.ManagedString or ValueType.String8;
+
+    /// <summary>剝掉 payload 之後的文字。</summary>
+    public static string Get(AtkValue value)
+    {
+        if (!IsStringType(value)) return value.GetValueAsString();
+
+        var ptr = value.String.Value;
+        return ptr == null ? string.Empty : MemoryHelper.ReadSeStringNullTerminated((nint)ptr).GetText();
+    }
+
+    /// <summary>這一格在<b>未剝 payload 的讀法</b>底下是不是非空。</summary>
+    /// <remarks>
+    /// 🔴 <c>GetValueTexts()</c> 的過濾條件刻意沿用這個判準，而不是改成「剝完之後非空」：
+    /// 只由 payload 構成的格子剝完會變成空字串，用新判準過濾會讓那一格<b>從清單裡消失</b>，
+    /// 後面每一格的索引整個往前移一位 —— 而 <c>Macros/care_all.lua</c>／<c>Macros/tend_garden.lua</c> 都是拿位置去算
+    /// <c>/callback</c> 的 index，位移的失敗形式是<b>按到隔壁那一項</b>，不會報錯。
+    /// 沿用這個判準 ⇒ 清單長度與每一格的位置都不變，只有內容被剝乾淨。
+    /// </remarks>
+    public static bool HasText(AtkValue value)
+    {
+        if (!IsStringType(value)) return !string.IsNullOrEmpty(value.GetValueAsString());
+
+        var ptr = value.String.Value;
+        return ptr != null && *ptr != 0;
+    }
 }

@@ -10,7 +10,7 @@ namespace SomethingNeedDoing.NativeMacro.Modifiers;
     [],
     ["/item Calamari Ripieni <hq>"]
 )]
-public class ItemQualityModifier(string text, bool isHq) : MacroModifierBase(text)
+public class HqModifier(string text, bool isHq) : MacroModifierBase(text)
 {
     private static readonly Regex Regex = new(@"(?<modifier><hq>)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
@@ -25,14 +25,14 @@ public class ItemQualityModifier(string text, bool isHq) : MacroModifierBase(tex
         var match = Regex.Match(text);
         if (!match.Success)
         {
-            modifier = new ItemQualityModifier(string.Empty, false);
+            modifier = new HqModifier(string.Empty, false);
             return false;
         }
 
         var group = match.Groups["modifier"];
         text = text.Remove(group.Index, group.Length);
 
-        modifier = new ItemQualityModifier(group.Value, true);
+        modifier = new HqModifier(group.Value, true);
         return true;
     }
 }

@@ -2,6 +2,7 @@
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
 using ECommons.ImGuiMethods;
+using ECommons.LanguageHelpers;
 using SomethingNeedDoing.Core.Interfaces;
 using SomethingNeedDoing.Documentation;
 using SomethingNeedDoing.LuaMacro;
@@ -10,10 +11,26 @@ using System.Reflection;
 namespace SomethingNeedDoing.Gui.Tabs;
 public class HelpLuaTab(LuaDocumentation luaDocs)
 {
+    // Lua module types are fixed at assembly-load time, so scan for them once instead of
+    // running a full Assembly.GetTypes() reflection scan on every non-method doc entry drawn,
+    // every frame the tab is open.
+    private static readonly Dictionary<string, Type> ModuleTypesByName = typeof(HelpLuaTab).Assembly.GetTypes()
+        .Where(t => typeof(LuaModuleBase).IsAssignableFrom(t))
+        .GroupBy(t => t.Name)
+        .ToDictionary(g => g.Key, g => g.First());
+
+    // Same rationale as ModuleTypesByName: wrapper types are fixed at assembly-load time, and
+    // DrawWrapperProperties recurses into nested wrapper properties, so an uncached scan here
+    // could run several times per frame instead of just once per non-method doc entry.
+    private static readonly Dictionary<string, Type> WrapperTypesByName = typeof(HelpLuaTab).Assembly.GetTypes()
+        .Where(t => typeof(IWrapper).IsAssignableFrom(t))
+        .GroupBy(t => t.Name)
+        .ToDictionary(g => g.Key, g => g.First());
+
     public void DrawTab()
     {
         using var child = ImRaii.Child(nameof(HelpLuaTab));
-        ImGuiUtils.Section("Lua Scripting", () => ImGui.TextWrapped($"Below are all of the functions and properties provided by the framework. Click any to copy the full call path to clipboard. Hover any function to learn more about it."));
+        ImGuiUtils.Section("Lua Scripting".Loc(), () => ImGui.TextWrapped("Below are all of the functions and properties provided by the framework. Click any to copy the full call path to clipboard. Hover any function to learn more about it.".Loc()));
 
         foreach (var module in luaDocs.GetModules().OrderBy(m => m.Key))
         {
@@ -64,7 +81,7 @@ public class HelpLuaTab(LuaDocumentation luaDocs)
 
         if (!isMethod && function.Parameters.Count == 0)
         {
-            if (typeof(HelpLuaTab).Assembly.GetTypes().FirstOrDefault(t => t.Name == function.ModuleName.Split('.').Last() + "Module" && typeof(LuaModuleBase).IsAssignableFrom(t)) is { } modType)
+            if (ModuleTypesByName.TryGetValue(function.ModuleName.Split('.').Last() + "Module", out var modType))
             {
                 if (modType.GetProperty(function.FunctionName, BindingFlags.Public | BindingFlags.Instance) is { CanWrite: true })
                 {
@@ -117,7 +134,7 @@ public class HelpLuaTab(LuaDocumentation luaDocs)
         {
             if (!string.IsNullOrEmpty(ex))
             {
-                ImGui.TextColored(ImGuiColors.DalamudGrey, "Example:");
+                ImGui.TextColored(ImGuiColors.DalamudGrey, "Example:".Loc());
                 ImGuiEx.TextWrapped(ImGuiColors.DalamudYellow, ex);
             }
         }
@@ -161,10 +178,7 @@ public class HelpLuaTab(LuaDocumentation luaDocs)
 
     private void DrawWrapperProperties(string wrapperTypeName, string id, string parentChain = "")
     {
-        var wrapperType = typeof(HelpLuaTab).Assembly.GetTypes()
-            .FirstOrDefault(t => t.Name == wrapperTypeName && typeof(IWrapper).IsAssignableFrom(t));
-
-        if (wrapperType == null || !typeof(IWrapper).IsAssignableFrom(wrapperType))
+        if (!WrapperTypesByName.TryGetValue(wrapperTypeName, out var wrapperType))
             return;
 
         var wrapperProperties = wrapperType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
