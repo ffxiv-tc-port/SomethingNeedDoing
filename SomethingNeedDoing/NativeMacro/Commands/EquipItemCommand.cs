@@ -16,8 +16,6 @@ namespace SomethingNeedDoing.NativeMacro.Commands;
 )]
 public class EquipItemCommand(string text, uint itemId) : MacroCommandBase(text)
 {
-    private static int EquipAttemptLoops = 0;
-
     /// <inheritdoc/>
     public override bool RequiresFrameworkThread => true;
 
@@ -129,11 +127,9 @@ public class EquipItemCommand(string text, uint itemId) : MacroCommandBase(text)
                 // 走到這裡代表上面一發都沒送出去 ⇒ 這扇選單還是幾行前才剛解出來的那一扇,
                 // 中間沒有任何原生程式碼碰過它,送 p2=-1(關閉)是安全的。
                 Callback.Fire(contextMenu, true, 0, -1, 0, 0, 0);
+                // 每次 /equip 只開一次選單、沒有重試;找不到「裝備」照「找不到道具」的慣例記錯誤後放棄,不中止巨集。
+                FrameworkLogger.Error($"/equip: no equip option in the context menu for item #{itemId}; closed the menu without equipping");
             }
-            EquipAttemptLoops++;
-
-            if (EquipAttemptLoops >= 5)
-                throw new MacroException("Failed to find equip option after 5 attempts");
         }
     }
 
