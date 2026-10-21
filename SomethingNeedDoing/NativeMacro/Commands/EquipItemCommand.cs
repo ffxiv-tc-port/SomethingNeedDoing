@@ -97,6 +97,11 @@ public class EquipItemCommand(string text, uint itemId) : MacroCommandBase(text)
                 throw new MacroException($"Cannot equip item #{itemId}: unexpected context menu layout (first entry index {firstEntry})");
             }
 
+            // 本次選單只有 ContextItemCount 項,再往後的 EventIds 是上一個選單留下的舊值,不可當成這次的「裝備」。
+            // 先夾到 [0, EventIds.Length] 再加,壞值也不會溢位或放寬上界。
+            var itemCount = System.Math.Clamp(ctx->ContextItemCount, 0, ctx->EventIds.Length);
+            entryCount = System.Math.Min(entryCount, firstEntry + itemCount);
+
             // 🔴🔴 一次 /equip 對同一扇選單最多只能送「一發」close:true 的 callback:Callback.Fire 的 updateState 就是原生
             //    FireCallback 的 close 參數,close 為真時原生會在**回到這段 C# 之前**跑完 Hide + Close ⇒ 送出之後
             //    contextMenu 這個指標隨時可能已經失效,而對失效的原生指標再開火是攔不到的存取違規。
