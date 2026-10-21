@@ -36,6 +36,9 @@ public class KeyItemCommand(string text, string itemName) : MacroCommandBase(tex
         await PerformWait(token);
     }
 
+    // 台服 EventItem 的名稱放在 Singular（Name 幾乎全空）：先照舊比 Name，找不到再比 Singular。
     private uint SearchItemId(string itemName)
-        => FindRow<EventItem>(x => x.Name.ExtractText().Equals(itemName, StringComparison.InvariantCultureIgnoreCase))?.RowId ?? throw new MacroException($"Key item not found: {itemName}");
+        => FindRow<EventItem>(x => x.Name.ExtractText().Equals(itemName, StringComparison.InvariantCultureIgnoreCase))?.RowId
+        ?? FindRow<EventItem>(x => x.Singular.ExtractText().Equals(itemName, StringComparison.InvariantCultureIgnoreCase))?.RowId
+        ?? throw new MacroException($"Key item not found: {itemName}");
 }
