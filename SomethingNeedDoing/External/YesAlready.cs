@@ -364,6 +364,24 @@ public class YesAlready : IPC, IDisableable, IDisposable
         GC.SuppressFinalize(this);
     }
 
+    private int _heartbeatFailureReported;
+
+    // 計時器回呼跑在執行緒池上：例外穿出去＝整個遊戲結束，所以整段包住；背景執行緒不可用 EzThrottler，自帶旗標只記一次。
+    private void OnHeartbeat(object? state)
+    {
+        try
+        {
+            HeartbeatCore();
+        }
+        catch (Exception ex)
+        {
+            if (Interlocked.Exchange(ref _heartbeatFailureReported, 1) != 0)
+                return;
+            try { Svc.Log.Error(ex, "YesAlready suppression heartbeat failed; further failures will not be logged"); }
+            catch { /* 卸載中連 log 都可能不可用；這裡只求不讓例外穿出去。 */ }
+        }
+    }
+
     /// <summary>
     /// 心跳：巨集可以跑好幾個小時，而租約上限只有 5 分鐘。
     /// </summary>
@@ -373,7 +391,7 @@ public class YesAlready : IPC, IDisableable, IDisposable
     /// 🔴 續約與重新取得<b>都在 <see cref="_gate"/> 之外呼叫</b>；回到鎖裡時先比對版本號與手上的憑證，
     /// 確認這段期間沒有人把租約放掉或換成別把，結果才算數。
     /// </remarks>
-    private void OnHeartbeat(object? state)
+    private void HeartbeatCore()
     {
         Guid lease;
         long seq;

@@ -18,6 +18,7 @@ public class Config
 
     private static FileSystemWatcher? _configWatcher;
     private static DateTime _lastConfigChange = DateTime.MinValue;
+    private static int _watcherFailureReported;
 
     public static void InitializeFileWatcher()
     {
@@ -47,15 +48,26 @@ public class Config
 
     private static void OnConfigFileChanged(object sender, FileSystemEventArgs e)
     {
-        if ((DateTime.Now - _lastConfigChange).TotalMilliseconds < 500) // debounce rapid changes
-            return;
+        // 跑在執行緒池回呼上：例外穿出去＝整個遊戲結束，所以整段包住。背景執行緒不可用 EzThrottler，自帶旗標只記一次。
+        try
+        {
+            if ((DateTime.Now - _lastConfigChange).TotalMilliseconds < 500) // debounce rapid changes
+                return;
 
-        _lastConfigChange = DateTime.Now;
-        // 監聽器的回呼在它自己的執行緒上；卸載窗內轉派會就地在那條執行緒跑。
-        if (FrameworkUnloadGuard.ShouldSkip("設定檔變更"))
-            return;
+            _lastConfigChange = DateTime.Now;
+            // 監聽器的回呼在它自己的執行緒上；卸載窗內轉派會就地在那條執行緒跑。
+            if (FrameworkUnloadGuard.ShouldSkip("設定檔變更"))
+                return;
 
-        Svc.Framework.RunOnTick(() => ConfigFileChanged?.Invoke());
+            Svc.Framework.RunOnTick(() => ConfigFileChanged?.Invoke());
+        }
+        catch (Exception ex)
+        {
+            if (System.Threading.Interlocked.Exchange(ref _watcherFailureReported, 1) != 0)
+                return;
+            try { Svc.Log.Error(ex, "Config file watcher handler failed; further failures will not be logged"); }
+            catch { /* 卸載中連 log 都可能不可用；這裡只求不讓例外穿出去。 */ }
+        }
     }
 
     #region General Settings
