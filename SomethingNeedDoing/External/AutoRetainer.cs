@@ -159,6 +159,35 @@ public class AutoRetainer : IPC
     [LuaFunction(description: "Retainer names of the current character that have an entrust plan assigned in AutoRetainer, in AutoRetainer's own order. Lets a macro act on 'the retainers the user configured' instead of a hardcoded list.")]
     public readonly Func<List<string>> GetRetainersWithEntrustPlan = null!;
 
+    // 「跑一輪就回來」：這六支吞例外，舊版 AutoRetainer 沒有這組端點時回 0／nil／false，讓巨集退回自己的做法而不是出錯停掉。
+    [EzIPC("RoundTrip.ApiVersion", wrapper: SafeWrapper.AnyException)]
+    [LuaFunction(description: "Version of AutoRetainer's run-once-and-return API (the RoundTrip* functions). 0 when AutoRetainer is too old to have it - fall back to your own handling then.")]
+    public readonly Func<int> RoundTripApiVersion = null!;
+
+    [EzIPC("RoundTrip.Start", wrapper: SafeWrapper.AnyException)]
+    [LuaFunction(description: "Same as the \"Run once and return\" button: turns Multi Mode on, and once no character has anything to handle turns it off and logs back into the character you are on now. Returns the trip id (> 0) when it started; -1 = a trip is already running (possibly one the user started), -2 = Multi Mode is already on, -3 = not logged in or this character is not on AutoRetainer's list, 0 = no answer (check RoundTripActiveId).")]
+    public readonly Func<int> RoundTripStart = null!;
+
+    [EzIPC("RoundTrip.ActiveId", wrapper: SafeWrapper.AnyException)]
+    [LuaFunction(description: "Id of the run-once-and-return trip in progress, whoever started it; 0 when none.")]
+    public readonly Func<int> RoundTripActiveId = null!;
+
+    [EzIPC("RoundTrip.ActivePhase", wrapper: SafeWrapper.AnyException)]
+    [LuaFunction(description: "\"running\" while Multi Mode is handling characters, \"returning\" while switching back to the original character, empty when no trip is in progress.")]
+    public readonly Func<string?> RoundTripActivePhase = null!;
+
+    [EzIPC("RoundTrip.Result", wrapper: SafeWrapper.AnyException)]
+    [LuaFunction(
+        description: "How trip <id> ended: returned (on the original character, Multi Mode off), return_timeout / return_missing (finished but could not switch back), cancelled_multi_off, cancelled_multi_on, cancelled_relog, cancelled_user, cancelled_stop (emergency stop), cancelled_ipc. Empty while it is still running or when the id is unknown (AutoRetainer reloaded, or eight newer trips ended since).",
+        parameterDescriptions: ["id"])]
+    public readonly Func<int, string?> RoundTripResult = null!;
+
+    [EzIPC("RoundTrip.Cancel", wrapper: SafeWrapper.AnyException)]
+    [LuaFunction(
+        description: "Cancels trip <id> only if it is the one in progress; a trip the user started has a different id and is left alone. Does not turn Multi Mode off. Returns true when it cancelled.",
+        parameterDescriptions: ["id"])]
+    public readonly Func<int, bool> RoundTripCancel = null!;
+
     [EzIPC("GC.%m")]
     [LuaFunction(description: "Enqueues initiation")]
     public readonly Action EnqueueInitiation = null!;
