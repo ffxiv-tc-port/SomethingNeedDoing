@@ -218,7 +218,9 @@ public class NLuaMacroEngine(LuaModuleManager moduleManager, CleanupManager clea
         }
         finally
         {
-            _activeLuaEnvironments.Remove(macro.Macro.Id, out var _);
+            // 只移除自己這一輪的環境：以 Id 為鍵，不能把同一支巨集下一輪登記的環境一起拿掉。
+            if (lua != null)
+                _activeLuaEnvironments.TryRemove(new KeyValuePair<string, Lua>(macro.Macro.Id, lua));
 
             // Doing this manually since NLua is a very well written library
             if (lua != null)

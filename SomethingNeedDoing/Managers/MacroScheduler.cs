@@ -28,6 +28,7 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     private readonly ConcurrentDictionary<string, AddonEventConfig> _addonEvents = [];
     private readonly ConcurrentDictionary<string, IDisableable> _disableablePlugins = [];
     private readonly ConcurrentDictionary<string, List<string>> _cachedFunctionNames = []; // avoid duplicate regex matching in rapid succession (OnUpdate, etc)
+    private readonly MacroRunGate _runGate = new();
 
     private readonly NativeMacroEngine _nativeEngine;
     private readonly NLuaMacroEngine _luaEngine;
@@ -268,6 +269,60 @@ public class MacroScheduler : IMacroScheduler, IDisposable
             return;
         }
 
+        var gate = await _runGate.EnterAsync(macro.Id, PreviousRunMaxWait, PreviousRunNoticeAfter, () => NotifyWaitingForPreviousRun(macro));
+        if (gate.Run is not { } run)
+        {
+            ReportGateRefusal(macro, gate.Outcome);
+            return;
+        }
+
+        try
+        {
+            if (gate.Waited)
+                await Svc.Framework.RunOnFrameworkThread(() => { });
+            await RunMacroAsync(macro, loopCount, triggerArgs);
+        }
+        finally
+        {
+            _runGate.Exit(run);
+        }
+    }
+
+    /// <summary>上一輪還在收尾時，新的一輪最多排隊等多久；超過就拒絕並在聊天視窗說明。</summary>
+    private static readonly TimeSpan PreviousRunMaxWait = TimeSpan.FromSeconds(30);
+
+    /// <summary>短於這個時間收完的就不打擾使用者（觸發器在上一輪收尾時重新觸發屬於常態）。</summary>
+    private static readonly TimeSpan PreviousRunNoticeAfter = TimeSpan.FromSeconds(1);
+
+    private static void NotifyWaitingForPreviousRun(IMacro macro)
+    {
+        FrameworkLogger.Info($"Macro {macro.Name}: previous run is still finishing, start is queued");
+        Svc.Chat.PrintMessage($"巨集「{macro.Name}」上一輪還在收尾，收完就會開始這一輪。");
+    }
+
+    private static void ReportGateRefusal(IMacro macro, MacroRunGate.Outcome outcome)
+    {
+        switch (outcome)
+        {
+            case MacroRunGate.Outcome.AlreadyRunning:
+                FrameworkLogger.Warning($"Macro {macro.Name} is already running.");
+                break;
+            case MacroRunGate.Outcome.AlreadyQueued:
+                FrameworkLogger.Debug($"Macro {macro.Name}: a start is already queued behind the previous run");
+                break;
+            case MacroRunGate.Outcome.Cancelled:
+                FrameworkLogger.Info($"Macro {macro.Name}: queued start cancelled by a stop request");
+                break;
+            case MacroRunGate.Outcome.TimedOut:
+                FrameworkLogger.Info($"Macro {macro.Name}: previous run did not finish within {PreviousRunMaxWait.TotalSeconds:0}s, start refused");
+                Svc.Chat.PrintErrorMsg($"巨集「{macro.Name}」上一輪 {PreviousRunMaxWait.TotalSeconds:0} 秒內還沒收完，這次沒有啟動，請稍後再試。");
+                break;
+        }
+    }
+
+    /// <summary>單一一輪的執行與收尾；呼叫端已經保證同一個 Id 沒有別的一輪在跑或在收尾。</summary>
+    private async Task RunMacroAsync(IMacro macro, int loopCount, TriggerEventArgs? triggerArgs)
+    {
         macro.StateChanged += OnMacroStateChanged;
         macro.ContentChanged += OnMacroContentChanged;
         var state = new MacroExecutionState(macro);
@@ -451,8 +506,10 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     {
         try
         {
+            _runGate.CancelPending(macroId);
             if (_macroStates.TryGetValue(macroId, out var state))
             {
+                _runGate.MarkEnding(macroId);
                 state.CancellationSource.Cancel();
                 // 🔴 必須在改 State 之前設：那個設定子是同步觸發 StateChanged 的，
                 //    設在後面等於 OnMacroStateChanged 讀到 false ⇒ 按停止也會念一句「跑完了」。
@@ -480,6 +537,8 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     /// <param name="macroId">The ID of the macro to clean up.</param>
     public void CleanupMacro(string macroId)
     {
+        _runGate.CancelPending(macroId);
+        _runGate.MarkEnding(macroId);
         if (_macroStates.Remove(macroId, out var state))
         {
             if (state.Macro is ConfigMacro configMacro)
@@ -527,7 +586,11 @@ public class MacroScheduler : IMacroScheduler, IDisposable
     }
 
     /// <inheritdoc/>
-    public void StopAllMacros() => _enginesByMacroId.Keys.Each(StopMacro);
+    public void StopAllMacros()
+    {
+        _runGate.CancelAllPending();
+        _enginesByMacroId.Keys.Each(StopMacro);
+    }
 
     /// <inheritdoc/>
     public void CheckLoopPause(string macroId)
@@ -718,6 +781,9 @@ public class MacroScheduler : IMacroScheduler, IDisposable
 
         if (e.NewState is MacroState.Completed or MacroState.Error)
         {
+            // 必須在移除 _macroStates 之前：否則另一條執行緒的啟動會把這一輪當成「已經在跑」而不是排隊等它收完。
+            _runGate.MarkEnding(e.MacroId);
+
             if (sender is IMacro macro)
             {
                 if (macro.Metadata.TriggerEvents.Contains(TriggerEvent.OnAutoRetainerCharacterPostProcess))
@@ -1179,6 +1245,7 @@ public class MacroScheduler : IMacroScheduler, IDisposable
         _nativeEngine.LoopControlRequested -= OnLoopControlRequested;
         _luaEngine.LoopControlRequested -= OnLoopControlRequested;
 
+        _runGate.CancelAllPending();
         _macroStates.Values.Each(s => s.Dispose());
         _macroStates.Clear();
         _enginesByMacroId.Clear();
