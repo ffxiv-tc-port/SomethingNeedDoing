@@ -45,4 +45,9 @@ public class ICE : IPC
     [EzIPC]
     [LuaFunction(description: "Returns the id of the mission ICE is currently on (0 when none).")]
     public readonly Func<uint> CurrentMission = null!;
+
+    // 只有這支吞例外：舊版 ICE 沒有這個端點時要回 nil 讓巨集照舊走，而不是讓整支巨集出錯停掉。
+    [EzIPC(wrapper: SafeWrapper.AnyException)]
+    [LuaFunction(description: "Returns why ICE last stopped: tool_xp_full, stop_after_current, user, ipc_disable, goal_reached, no_mission, left_zone, error, gamba_done. Empty while running or not stopped since it was started; nil when ICE is too old to report it. Treat unknown codes as \"other\".")]
+    public readonly Func<string?> StopReason = null!;
 }
