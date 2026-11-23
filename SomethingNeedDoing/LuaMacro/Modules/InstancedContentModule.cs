@@ -66,6 +66,7 @@ public unsafe class InstancedContentModule : LuaModuleBase
     }
 
     [LuaFunction] public OceanFishingWrapper OceanFishing => new();
+    [LuaFunction][Changelog("15.15")] public DeepDungeonWrapper DeepDungeon => new();
     [LuaFunction] public OccultCrescentWrapper OccultCrescent => new(this);
 
     /// <summary>南方博德/新月島(Occult Crescent)的包裝層。</summary>
