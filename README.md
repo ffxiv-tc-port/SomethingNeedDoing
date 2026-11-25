@@ -27,11 +27,31 @@
 ## 台服版的修改
 
 - 介面繁體中文化。
-- 巨集用到的相依插件，安裝來源改指台服插件庫。
+- 巨集用到的相依插件，安裝來源改指台服的第三方插件倉庫。
 - 新增 Lua API：讀取聊天訊息、操作物品欄與圖示右鍵選單、AutoRetainer 逐格取回僱員道具；`/callback` 送出的事件會透過 IPC 廣播給其他插件。
+- Lua 可以讀深層迷宮狀態（`InstancedContent.DeepDungeon`）：樓層、房間格、隊友所在房間、魔陶器與魔石數量，也能使用魔陶器／魔石。
+- Lua 可以控制 ICE 的宇宙探索（`IPC.ICE`）：啟動／停止、設定「做完目前任務就停」、查詢是否還在執行、目前任務與上次停下的原因。
+- Lua 可以使用 AutoRetainer 的「跑一輪就回來」（`IPC.AutoRetainer` 的 `RoundTrip*` 函式）；AutoRetainer 版本太舊沒有這項時回傳 0／nil／false，巨集照常執行。
 - 巨集跑完或出錯停下時可請塔塔露說一句（需要 TataruPraise）。
 - 巨集壓制 YesAlready 改用具名租約，跑完不會掀掉別的插件的壓制；關遊戲或重載時確實放開。
 - 修正 `/click` 在 `/loop` 第二圈起必定失敗、`/interact` 沒有目標時不報錯、製作巨集 SmartWait 等太久就安靜結束等問題。
+- 修正 `/equip` 換裝明明已換上卻報「找不到裝備選項」；`/keyitem` 用台服的重要物品名稱也找得到。
+- 巨集停止後馬上再執行時，新的一輪會等上一輪收尾完才開始，不會被上一輪的收尾中斷。
 - 巨集讀到的視窗文字、公會名、F.A.T.E. 名稱會先剝掉遊戲的圖示與連結標記。
 - 遊戲改版後部分遊戲資料讀不到時，Lua 模組改回報讀不到，不會讓遊戲出錯。
 - 多處降低記憶體用量。
+
+## 安裝
+
+1. 在遊戲內輸入 `/xlsettings` 開啟「Dalamud 設定」，到「試驗性功能」分頁的「第三方插件倉庫」加入
+   `https://raw.githubusercontent.com/ffxiv-tc-port/DalamudPluginsTC/main/repo.json`
+   勾選啟用後儲存。
+2. 輸入 `/xlplugins` 開啟「插件管理員」，搜尋「Something Need Doing」安裝。
+
+同一個插件只裝這裡的版本，不要同時安裝上游（國際服）版本。
+
+## 需要搭配的插件
+
+- 選用：[AutoRetainer](https://github.com/ffxiv-tc-port/AutoRetainer)（僱員相關的 Lua 函式與附帶的取回道具巨集）、[ICE](https://github.com/ffxiv-tc-port/ICE)（宇宙探索的 Lua 函式）、[TCToolbox](https://github.com/ffxiv-tc-port/TCToolbox)（附帶的園圃巨集會用到）、[TataruPraise](https://github.com/ffxiv-tc-port/TataruPraise)（塔塔露語音）、[YesAlready](https://github.com/ffxiv-tc-port/YesAlready)（巨集執行期間可暫停它）
+
+授權：上游未附授權。
