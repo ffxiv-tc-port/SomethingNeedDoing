@@ -154,11 +154,9 @@ public static class SettingsTab
                 }
 
                 var craftLoopFromRecipeNote = C.CraftLoopFromRecipeNote;
-                if (ImGui.Checkbox("Start crafting loops from recipe note window".Loc(), ref craftLoopFromRecipeNote))
-                {
-                    C.CraftLoopFromRecipeNote = craftLoopFromRecipeNote;
-                    C.Save();
-                }
+                using (ImRaii.Disabled())
+                    ImGui.Checkbox("Start crafting loops from recipe note window".Loc(), ref craftLoopFromRecipeNote);
+                NoEffectMark("This option currently has no effect: with the template on, crafting loops run exactly as the template is written; with it off, they detect by themselves whether the Crafting Log is open.".Loc());
 
                 var craftLoopMaxWait = C.CraftLoopMaxWait;
                 if (ImGui.SliderInt("CraftLoop maxwait value".Loc(), ref craftLoopMaxWait, 1, 10))
@@ -186,10 +184,9 @@ public static class SettingsTab
             ImGuiEx.Tooltip("Only meant for native macros.".Loc());
 
             var maxTimeoutRetries = C.MaxTimeoutRetries;
-            if (ImGui.SliderInt("Max Timeout Retries".Loc(), ref maxTimeoutRetries, 0, 10))
-                C.MaxTimeoutRetries = maxTimeoutRetries;
-            if (ImGui.IsItemDeactivatedAfterEdit())
-                C.Save();
+            using (ImRaii.Disabled())
+                ImGui.SliderInt("Max Timeout Retries".Loc(), ref maxTimeoutRetries, 0, 10);
+            NoEffectMark("This option currently has no effect: a timed-out action is never retried. The macro stops with an error only when \"Stop on error\" is ticked or the line uses <errorif.actiontimeout>; otherwise it moves on to the next line.".Loc());
 
             var noisyErrors = C.NoisyErrors;
             if (ImGui.Checkbox("Noisy Errors".Loc(), ref noisyErrors))
@@ -267,5 +264,21 @@ public static class SettingsTab
             if (ImGuiUtils.IconButton(FontAwesomeHelper.IconImport, "Import".Loc()))
                 MigrationModal.Open(ImGui.GetClipboardText());
         });
+    }
+
+    /// <summary>
+    /// 接在一個停用的舊選項後面：滑過顯示實際行為、旁邊灰字標「（無作用）」。
+    /// </summary>
+    /// <remarks>舊選項畫的是設定值複本、不寫回，使用者存的值原樣保留。</remarks>
+    private static void NoEffectMark(string note)
+    {
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            using var tooltip = ImRaii.Tooltip();
+            using var wrap = ImRaii.TextWrapPos(ImGui.GetFontSize() * 30);
+            ImGui.TextUnformatted(note);
+        }
+        ImGui.SameLine();
+        ImGuiEx.Text(ImGuiColors.DalamudGrey, "(No effect)".Loc());
     }
 }

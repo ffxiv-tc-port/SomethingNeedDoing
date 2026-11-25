@@ -823,6 +823,10 @@ public class MacroScheduler : IMacroScheduler, IDisposable
             _enginesByMacroId.Remove(e.MacroId, out _);
 
             NotifyTataruPraise(sender, e, hadState, stoppedManually, macroName);
+
+            // 與塔塔露通知同一組去重閘門：子巨集不響、同一支巨集的第二個結束事件不響。
+            if (e.NewState == MacroState.Error && hadState && sender is not TemporaryMacro)
+                ErrorBeep.TryPlay();
         }
     }
 
