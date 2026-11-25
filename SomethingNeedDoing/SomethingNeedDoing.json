@@ -1,8 +1,8 @@
 {
   "Author": "daemitus, croizat",
   "Name": "Something Need Doing",
-  "Punchline": "工作，工作。",
-  "Description": "現在不只能用於生產，功能更多！",
+  "Punchline": "不限行數的巨集與 Lua 腳本，可同時執行多個。",
+  "Description": "擴充遊戲的巨集系統：巨集不限行數，還能用 Lua 寫腳本。輸入 /snd 開啟。\n\n- 相容遊戲原生巨集語法，另外擴充等待、迴圈、條件等指令與修飾詞\n- 可同時執行多個巨集，隨時暫停、恢復或停止，也能指定迴圈次數\n- Lua 腳本可讀取角色、背包、任務、副本等狀態，操作遊戲視窗，並呼叫其他插件\n- Lua 可控制 AutoRetainer 與 ICE（需另外安裝這兩個插件），也能讀深層迷宮的樓層狀態\n- 巨集跑完或出錯停下時可請塔塔露出聲提醒（需搭配 TataruPraise）",
   "ApplicableVersion": "any",
   "DalamudApiLevel": 13,
   "RepoUrl": "https://github.com/ffxiv-tc-port/SomethingNeedDoing",
