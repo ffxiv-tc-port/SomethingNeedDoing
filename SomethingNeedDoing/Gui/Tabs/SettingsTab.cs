@@ -152,11 +152,14 @@ public static class SettingsTab
                     C.CraftLoopTemplate = craftLoopTemplate;
                     C.Save();
                 }
-
+            }
+            else
+            {
+                // 下面三項只有不用範本時引擎才讀（NativeMacroEngine.ModifyMacroForCraftLoop），範本模式照範本內容跑。
                 var craftLoopFromRecipeNote = C.CraftLoopFromRecipeNote;
                 using (ImRaii.Disabled())
                     ImGui.Checkbox("Start crafting loops from recipe note window".Loc(), ref craftLoopFromRecipeNote);
-                NoEffectMark("This option currently has no effect: with the template on, crafting loops run exactly as the template is written; with it off, they detect by themselves whether the Crafting Log is open.".Loc());
+                NoEffectMark("This option currently has no effect: crafting loops detect by themselves, when they start, whether the Crafting Log is open.".Loc());
 
                 var craftLoopMaxWait = C.CraftLoopMaxWait;
                 if (ImGui.SliderInt("CraftLoop maxwait value".Loc(), ref craftLoopMaxWait, 1, 10))
